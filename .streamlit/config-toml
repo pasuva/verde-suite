@@ -1,0 +1,13 @@
+[theme]
+base = "light"
+primaryColor = "#66B032"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F7F2"
+textColor = "black"
+font = "calibri"
+# Ajuste de bordes
+baseRadius = "none"           # elimina completamente el redondeo en casi todos los elementos
+buttonRadius = "none"         # asegura que los botones también queden sin redondeo
+
+[browser]
+gatherUsageStats = false
