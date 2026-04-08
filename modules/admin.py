@@ -15,6 +15,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import pandas as pd
+import io
 import streamlit as st
 from folium.plugins import MarkerCluster, Geocoder, Fullscreen
 from streamlit_folium import st_folium
@@ -1532,6 +1533,7 @@ def viabilidades_seccion():
 
             # Preparamos la configuración con filtros y anchos
             gb = GridOptionsBuilder.from_dataframe(df_reordered)
+
             gb.configure_default_column(
                 filter=True,
                 floatingFilter=True,
@@ -1540,7 +1542,7 @@ def viabilidades_seccion():
                 minWidth=100,
                 flex=1
             )
-
+            gb.configure_pagination(enabled=True, paginationPageSize=20, paginationAutoPageSize=False)
             # Resaltado de duplicados
             dup_ids = viabilidades_df.loc[viabilidades_df['is_duplicate'], 'apartment_id'].copy().unique().tolist()
 
@@ -7407,6 +7409,86 @@ def admin_dashboard():
                         import traceback
                         st.toast(f"Detalles: {traceback.format_exc()}")
 
+            # ===================== 📦 TARJETA PARA CARGAR APARTMENTS (CSV) =====================
+            st.markdown("""
+            <div style='background-color:#F0F7F2; padding:25px; margin-top:10px; text-align:center;'>
+                <h4 style='color:#1e3d59;'>🏢 Cargar Masiva AMS</h4>
+                <p>Arrastra o selecciona el archivo <b>CSV</b> con los datos de apartments.<br>
+                Este proceso <b>reemplazará completamente</b> la tabla existente.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            uploaded_apartments = st.file_uploader(
+                "Selecciona un archivo CSV para la tabla apartments",
+                type=["csv"],
+                key="upload_apartments",
+                label_visibility="collapsed"
+            )
+
+            if uploaded_apartments is not None:
+                try:
+                    with st.spinner("⏳ Procesando archivo de apartments. Esto puede tomar varios minutos..."):
+                        conn = obtener_conexion()
+                        cur = conn.cursor()
+
+                        cur.execute("TRUNCATE TABLE apartments;")
+                        conn.commit()
+                        st.toast("🗑️ Tabla apartments vaciada.")
+
+                        columnas = [
+                            "id", "apartment_id", "address_id", "provincia", "municipio", "poblacion", "street_id",
+                            "tipo_vial", "vial", "parcela_catastral", "numero", "bis", "bloque", "portal_puerta",
+                            "letra", "codigo_postal", "lng", "lat", "site_activation_date", "escalera", "piso",
+                            "mano1", "mano2", "apartment_sales_area", "apartment_dummy", "apartment_operational_state",
+                            "apartment_activation_date", "subvention_code_ds", "user_serviciable"
+                        ]
+
+                        chunksize = 50000
+                        total_filas = 0
+                        progress_bar = st.progress(0)
+
+                        chunk_iter = pd.read_csv(uploaded_apartments, chunksize=chunksize, low_memory=False, dtype=str)
+
+                        for i, chunk in enumerate(chunk_iter):
+                            chunk = chunk.replace(["DS", "DESCONOCIDO", ""], pd.NA)
+                            if "apartment_dummy" in chunk.columns:
+                                chunk["apartment_dummy"] = chunk["apartment_dummy"].map(
+                                    lambda x: True if str(x).lower() == "true" else False if str(
+                                        x).lower() == "false" else None
+                                )
+                            for col in ["site_activation_date", "apartment_activation_date"]:
+                                if col in chunk.columns:
+                                    chunk[col] = pd.to_datetime(chunk[col], errors="coerce", utc=True)
+                            chunk = chunk.where(pd.notnull(chunk), None)
+
+                            chunk = chunk[columnas]
+
+                            output = io.StringIO()
+                            chunk.to_csv(output, index=False, header=False, na_rep="\\N", sep=",")
+                            output.seek(0)
+                            with cur.copy(
+                                    "COPY apartments FROM STDIN WITH (FORMAT CSV, DELIMITER ',', NULL '\\N')") as copy:
+                                copy.write(output.getvalue())
+                            conn.commit()
+
+                            filas_chunk = len(chunk)
+                            total_filas += filas_chunk
+                            progress_bar.progress(min((i + 1) * chunksize / (total_filas + 1), 1.0))
+                            st.toast(f"Insertadas {filas_chunk} filas (total {total_filas})")
+
+                        cur.close()
+                        conn.close()
+                        st.toast(f"✅ Carga completada. Total de filas insertadas: {total_filas}")
+                        log_trazabilidad(
+                            st.session_state["username"],
+                            "Carga Apartments",
+                            f"Archivo {uploaded_apartments.name} con {total_filas} registros procesados (reemplazo completo)."
+                        )
+                except Exception as e:
+                    st.toast(f"❌ Error al cargar el archivo de apartments: {e}")
+                    import traceback
+                    st.toast(f"Detalles: {traceback.format_exc()}")
+
 
     # Opción: Trazabilidad y logs
     elif opcion == "Trazabilidad y logs":
@@ -8652,7 +8734,7 @@ def mostrar_kpis_seguimiento_contratos():
             col1, col2 = st.columns(2)
 
             with col1:
-                import io
+
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df_contratos.to_excel(writer, index=False, sheet_name='Contratos')
