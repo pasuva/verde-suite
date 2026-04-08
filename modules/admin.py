@@ -1317,9 +1317,9 @@ def mapa_seccion():
             markers_added += 1
 
             # Límite de rendimiento
-            if markers_added >= 1000:
-                st.warning("⚠️ Mostrando primeros 1000 puntos por rendimiento")
-                break
+            #if markers_added >= 1000:
+            #    st.warning("⚠️ Mostrando primeros 1000 puntos por rendimiento")
+            #    break
 
         # Renderizar mapa
         map_data = st_folium(
@@ -1363,29 +1363,6 @@ def mapa_seccion():
                 width='stretch',
                 key="exportar_csv_btn"
             )
-
-
-# Funciones de compatibilidad
-#def limpiar_mapa():
-#    """Función placeholder para mantener compatibilidad"""
-#    pass
-
-
-#def cargar_datos_uis():
-#    """Función original para mantener compatibilidad"""
-#    return cargar_datos_limitados()
-
-
-#def mostrar_info_rapida(apartment_id: str, datos_filtrados: pd.DataFrame,
-#                        comercial_filtradas: pd.DataFrame, dicts: Dict):
-#    """Función original para mantener compatibilidad - usar mostrar_info_detallada en su lugar"""
-#    mostrar_info_detallada(apartment_id, datos_filtrados, comercial_filtradas, dicts)
-
-
-#def mostrar_info_apartamento(apartment_id, datos_df, comercial_rafa_df):
-#    """Función original para mantener compatibilidad - usar mostrar_info_detallada en su lugar"""
-#    dicts = crear_diccionarios_optimizados(comercial_rafa_df)
-#    mostrar_info_detallada(apartment_id, datos_df, comercial_rafa_df, dicts)
 
 
 def guardar_comentario(apartment_id, comentario, tabla):
