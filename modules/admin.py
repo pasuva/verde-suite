@@ -675,7 +675,6 @@ def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
             AND longitud IS NOT NULL
             AND latitud != 0 
             AND longitud != 0
-            LIMIT 500
         """
 
         query_comercial = """
@@ -1142,7 +1141,7 @@ def mapa_seccion():
             datos_filtrados, comercial_filtradas = cargar_datos_limitados()
 
             if not datos_filtrados.empty:
-                st.toast(f"✅ Vista previa cargada: {len(datos_filtrados)} apartments")
+                st.toast(f"✅ Puntos cargados: {len(datos_filtrados)} apartments")
 
     # ===== VERIFICACIÓN Y PROCESAMIENTO DE DATOS =====
 
