@@ -155,8 +155,8 @@ def guardar_viabilidad(datos):
         INSERT INTO viabilidades (
             latitud, longitud, provincia, municipio, poblacion, vial, numero, letra,
             cp, comentario, fecha_viabilidad, ticket, nombre_cliente, telefono,
-            usuario, olt, apartment_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)
+            usuario, olt, apartment_id, categorias
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)
         """,
         datos,
     )
@@ -270,7 +270,7 @@ def guardar_en_base_de_datos_vip(
                     cp = %s, latitud = %s, longitud = %s, nombre_cliente = %s, telefono = %s,
                     direccion_alternativa = %s, observaciones = %s, serviciable = %s, motivo_serviciable = %s,
                     incidencia = %s, motivo_incidencia = %s, fichero_imagen = %s, fecha = %s, tipo_vivienda = %s,
-                    contrato = %s, comercial = %s
+                    contrato = %s, comercial = %s, categorias = %s
                 WHERE apartment_id = %s
                 """,
                 (
@@ -296,6 +296,7 @@ def guardar_en_base_de_datos_vip(
                     oferta_data["Tipo_Vivienda"],
                     oferta_data["Contrato"],
                     comercial_logueado,
+                    oferta_data.get("categorias", []),  # <-- nuevo
                     apartment_id,
                 ),
             )
@@ -322,8 +323,8 @@ def guardar_en_base_de_datos_vip(
                 INSERT INTO comercial_rafa (
                     apartment_id, provincia, municipio, poblacion, vial, numero, letra, cp, latitud, longitud,
                     nombre_cliente, telefono, direccion_alternativa, observaciones, serviciable, motivo_serviciable,
-                    incidencia, motivo_incidencia, fichero_imagen, fecha, tipo_vivienda, contrato, comercial
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    incidencia, motivo_incidencia, fichero_imagen, fecha, tipo_vivienda, contrato, comercial, categorias
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -350,6 +351,7 @@ def guardar_en_base_de_datos_vip(
                     oferta_data["Tipo_Vivienda"],
                     oferta_data["Contrato"],
                     comercial_logueado,
+                    oferta_data.get("categorias", []),  # <-- nuevo
                 ),
             )
             st.success(f"✅ ¡Oferta insertada en comercial_rafa para {apartment_id}!")
@@ -742,6 +744,10 @@ def mostrar_formulario(click_data: Dict[str, Any]):
                 "📝 Observaciones",
                 key=f"observations_{form_key}",
             )
+            categorias = st.multiselect(
+                "📂 Categorías (opcional)",
+                options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+            )
 
         with st.expander("⚠️ Gestión de Incidencias", expanded=False):
             if es_serviciable == "Sí":
@@ -809,6 +815,7 @@ def mostrar_formulario(click_data: Dict[str, Any]):
             ),
             "Tipo_Vivienda": tipo_vivienda_final,
             "Contrato": contrato if es_serviciable == "Sí" else "",
+            "categorias": categorias,  # <-- nuevo
             "fecha": pd.Timestamp.now(tz="Europe/Madrid"),
         }
 
@@ -983,6 +990,10 @@ def _mostrar_viabilidades():
                 olt = st.selectbox("🏢 OLT", options=lista_olt)
             with col13:
                 apartment_id = st.text_input("🏘️ Apartment ID")
+                categorias = st.multiselect(
+                    "📂 Categorías (opcional)",
+                    options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+                )
 
             comentario = st.text_area("📝 Comentario")
             imagenes = st.file_uploader(
@@ -1014,6 +1025,7 @@ def _mostrar_viabilidades():
                         st.session_state["username"],
                         olt,
                         apartment_id,
+                        categorias,  # <-- nuevo campo
                     )
                 )
                 if imagenes:

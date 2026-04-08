@@ -104,10 +104,10 @@ def guardar_viabilidad(datos):
         INSERT INTO viabilidades (
             latitud, longitud, provincia, municipio, poblacion, vial, numero, letra,
             cp, comentario, fecha_viabilidad, ticket, nombre_cliente, telefono,
-            usuario, olt, apartment_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)
+            usuario, olt, apartment_id, categorias
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)
         """,
-        datos,
+        datos,  # ahora incluye categorias al final
     )
     conn.commit()
 
@@ -342,6 +342,10 @@ def mostrar_campos_formulario(lat, lon) -> Dict[str, Any]:
         olt = st.selectbox("🏢 OLT", options=obtener_lista_olt_cache())
     with col13:
         apartment_id = st.text_input("🏘️ Apartment ID")
+        categorias = st.multiselect(
+            "📂 Categorías (opcional)",
+            options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+        )
 
     comentario = st.text_area("📝 Comentario")
 
@@ -366,6 +370,7 @@ def mostrar_campos_formulario(lat, lon) -> Dict[str, Any]:
         "telefono": telefono,
         "olt": olt,
         "apartment_id": apartment_id,
+        "categorias": categorias,
         "comentario": comentario,
         "imagenes": imagenes,
     }
@@ -398,6 +403,7 @@ def guardar_viabilidad_completa(datos, lat, lon):
             st.session_state["username"],
             datos["olt"],
             datos["apartment_id"],
+            datos["categorias"],
         )
     )
     if datos["imagenes"]:

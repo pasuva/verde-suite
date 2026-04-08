@@ -206,7 +206,7 @@ def guardar_en_base_de_datos(
                 cp = %s, latitud = %s, longitud = %s, nombre_cliente = %s, telefono = %s,
                 direccion_alternativa = %s, observaciones = %s, serviciable = %s, motivo_serviciable = %s,
                 incidencia = %s, motivo_incidencia = %s, ocupado_por_tercero = %s, fichero_imagen = %s,
-                fecha = %s, tipo_vivienda = %s, contrato = %s, comercial = %s
+                fecha = %s, tipo_vivienda = %s, contrato = %s, comercial = %s, categorias = %s
             WHERE apartment_id = %s
             """,
             (
@@ -233,6 +233,7 @@ def guardar_en_base_de_datos(
                 oferta_data["Tipo_Vivienda"],
                 oferta_data["Contrato"],
                 comercial_logueado,
+                oferta_data.get("categorias", []),  # <-- nuevo
                 apartment_id,
             ),
         )
@@ -302,8 +303,8 @@ def guardar_viabilidad(datos):
         INSERT INTO viabilidades (
             latitud, longitud, provincia, municipio, poblacion, vial, numero, letra,
             cp, comentario, fecha_viabilidad, ticket, nombre_cliente, telefono,
-            usuario, olt, apartment_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)
+            usuario, olt, apartment_id, categorias
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)
         """,
         datos,
     )
@@ -778,6 +779,10 @@ def mostrar_formulario(click_data: Dict[str, Any]):
                 "📝 Observaciones Generales",
                 key=f"observations_{form_key}",
             )
+            categorias = st.multiselect(
+                "📂 Categorías (opcional)",
+                options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+            )
 
         with st.expander("⚠️ Gestión de Incidencias", expanded=False):
             if es_serviciable == "Sí":
@@ -862,6 +867,7 @@ def mostrar_formulario(click_data: Dict[str, Any]):
             ),
             "Tipo_Vivienda": tipo_vivienda_final,
             "Contrato": contrato if es_serviciable == "Sí" else "",
+            "categorias": categorias,
             "fecha": pd.Timestamp.now(tz="Europe/Madrid"),
         }
 
@@ -1044,6 +1050,10 @@ def _mostrar_viabilidades():
                 olt = st.selectbox("🏢 OLT", options=obtener_lista_olt_cache())
             with col13:
                 apartment_id = st.text_input("🏘️ Apartment ID")
+                categorias = st.multiselect(
+                    "📂 Categorías (opcional)",
+                    options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+                )
 
             comentario = st.text_area("📝 Comentario")
 
@@ -1076,6 +1086,7 @@ def _mostrar_viabilidades():
                         st.session_state["username"],
                         olt,
                         apartment_id,
+                        categorias,  # <-- nuevo campo
                     )
                 )
                 # Subir imágenes si las hay

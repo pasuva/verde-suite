@@ -2114,6 +2114,10 @@ def viabilidades_seccion():
                     id_olt, nombre_olt = opciones_olt[opcion_olt]
                 with col13:
                     apartment_id = st.text_input("🏘️ Apartment ID")
+                    categorias = st.multiselect(
+                        "📂 Categorías (opcional)",
+                        options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+                    )
 
                 # 🔹 NUEVOS CAMPOS OPCIONALES
                 col14, col15 = st.columns(2)
@@ -2181,7 +2185,8 @@ def viabilidades_seccion():
                         f"{id_olt}. {nombre_olt}",  # nuevo campo
                         apartment_id,  # nuevo campo
                         fecha_entrega,  # 🔹 NUEVO: Fecha de entrega (opcional)
-                        estado_obra  # 🔹 NUEVO: Estado de la obra (opcional)
+                        estado_obra,  # 🔹 NUEVO: Estado de la obra (opcional)
+                        categorias  # <-- nuevo campo
                     ))
 
                     st.toast(f"✅ Viabilidad guardada correctamente.\n\n📌 **Ticket:** `{ticket}`")
@@ -2346,26 +2351,10 @@ def guardar_viabilidad(datos):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO viabilidades (
-            latitud, 
-            longitud, 
-            provincia, 
-            municipio, 
-            poblacion, 
-            vial, 
-            numero, 
-            letra, 
-            cp, 
-            comentario, 
-            fecha_viabilidad, 
-            ticket, 
-            nombre_cliente, 
-            telefono, 
-            usuario,
-            olt,
-            apartment_id,
-            fecha_entrega,  -- 🔹 NUEVO CAMPO
-            estado_obra     -- 🔹 NUEVO CAMPO
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s)
+            latitud, longitud, provincia, municipio, poblacion, vial, numero, letra, cp,
+            comentario, fecha_viabilidad, ticket, nombre_cliente, telefono, usuario,
+            olt, apartment_id, fecha_entrega, estado_obra, categorias
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, datos)
     conn.commit()
 

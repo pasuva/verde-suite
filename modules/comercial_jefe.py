@@ -588,10 +588,10 @@ def guardar_viabilidad(datos):
         INSERT INTO viabilidades (
             latitud, longitud, provincia, municipio, poblacion, vial, numero, letra,
             cp, comentario, fecha_viabilidad, ticket, nombre_cliente, telefono,
-            usuario, olt, apartment_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)
+            usuario, olt, apartment_id, categorias
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)
         """,
-        datos
+        datos,
     )
     conn.commit()
 
@@ -1739,6 +1739,10 @@ def _crear_viabilidad():
                 olt = st.selectbox("🏢 OLT", options=lista_olt)
             with col13:
                 apartment_id = st.text_input("🏘️ Apartment ID")
+                categorias = st.multiselect(
+                    "📂 Categorías (opcional)",
+                    options=["SEGURIDAD", "COMUNICACIONES", "CCTV", "OTROS"]
+                )
 
             comentario = st.text_area("📝 Comentario")
 
@@ -1759,7 +1763,7 @@ def _crear_viabilidad():
                 guardar_viabilidad((
                     lat, lon, provincia, municipio, poblacion, vial, numero, letra,
                     cp, comentario, ticket, nombre_cliente, telefono, comercial,
-                    olt, apartment_id
+                    olt, apartment_id, categorias
                 ))
                 st.session_state.viabilidad_marker = None
                 st.session_state.map_center = (43.463444, -3.790476)
