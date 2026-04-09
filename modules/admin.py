@@ -1009,7 +1009,9 @@ def mostrar_info_detallada(apartment_id: str, datos_filtrados: pd.DataFrame,
             except Exception as e:
                 st.toast(f"❌ Error al guardar: {str(e)}")
 
+#---------------------------------------------------------------------------------------
 
+#---------------------------------------------------------------------------------------
 def mapa_seccion():
     """Muestra un mapa interactivo con filtros en zona principal"""
 
@@ -6400,7 +6402,7 @@ def admin_dashboard():
                                         conn.commit()
                                         conn.close()
                                         #base_url = "https://one7022025.onrender.com"
-                                        base_url = "https://verde-suite.verdesuite.sytes.net/"
+                                        base_url = "https://pre-verde-suite-prueba.verdesuite.sytes.net/"
                                         link_cliente = f"{base_url}?precontrato_id={precontrato[0]}&token={urllib.parse.quote(token)}"
                                         st.toast("✅ Nuevo enlace generado correctamente.")
                                         st.code(link_cliente, language="text")

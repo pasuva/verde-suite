@@ -1385,7 +1385,7 @@ def _formulario_precontrato_standalone():
                 conn.commit()
                 conn.close()
 
-                base_url = "https://verde-suite.verdesuite.sytes.net/"
+                base_url = "https://pre-verde-suite-prueba.verdesuite.sytes.net/"
                 link = f"{base_url}?precontrato_id={pre_id}&token={urllib.parse.quote(token)}"
                 st.success("✅ Precontrato guardado correctamente.")
                 st.markdown(f"📎 **Enlace para el cliente (válido 24 h):**")
@@ -1479,7 +1479,7 @@ def _listado_precontratos():
                         conn.commit()
                         conn.close()
 
-                        base_url = "https://verde-suite.verdesuite.sytes.net/"
+                        base_url = "https://pre-verde-suite-prueba.verdesuite.sytes.net/"
                         link = f"{base_url}?precontrato_id={pre[0]}&token={urllib.parse.quote(token)}"
                         st.success("✅ Nuevo enlace generado correctamente.")
                         st.code(link, language="text")
