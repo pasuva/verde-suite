@@ -11,7 +11,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from io import BytesIO
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import ftfy, folium, warnings, json, gspread, urllib, zipfile, datetime, bcrypt, os, io, secrets
+import ftfy, folium, warnings, json, gspread, urllib, zipfile, datetime, bcrypt, os, secrets
 from modules.db import get_db_connection as _db_conn
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import io
 import streamlit as st
-from folium.plugins import MarkerCluster, Geocoder, Fullscreen
+from folium.plugins import MarkerCluster, Geocoder
 from streamlit_folium import st_folium
 from branca.element import Template, MacroElement
 from modules.reportes_pdf import preparar_datos_para_pdf, generar_pdf_reportlab
