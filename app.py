@@ -88,7 +88,7 @@ else:
     elif rol == "auditor":
         auditor.mostrar_auditoria()
     elif rol == "rol_inventario":
-        inventario.inventario_auditoria()
+        inventario.inventario_dashboard()
     else:
         st.error("Rol no reconocido")
 
