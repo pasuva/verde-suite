@@ -585,25 +585,7 @@ def cargar_datos_uis():
 #    return sorted(df['provincia'].dropna().unique())
 
 
-def cargar_datos_por_provincia(provincia):
-    conn = obtener_conexion()
 
-    query_datos_uis = """
-        SELECT * 
-        FROM datos_uis
-        WHERE provincia = %s
-    """
-    datos_uis = pd.read_sql(query_datos_uis, conn, params=(provincia,))
-
-    query_comercial_rafa = """
-        SELECT * 
-        FROM comercial_rafa
-        WHERE provincia = %s
-    """
-    comercial_rafa_df = pd.read_sql(query_comercial_rafa, conn, params=(provincia,))
-
-    conn.close()
-    return datos_uis, comercial_rafa_df
 
 # ============================================
 # FUNCIONES DE CARGUE OPTIMIZADAS
@@ -611,10 +593,15 @@ def cargar_datos_por_provincia(provincia):
 
 @st.cache_data(ttl=600, max_entries=20)
 def cargar_provincias() -> List[str]:
-    """Carga la lista de provincias disponibles (cache por 10 minutos)"""
+    """Carga la lista de provincias disponibles de ambas tablas (cache por 10 minutos)"""
     conn = obtener_conexion()
     try:
-        query = "SELECT DISTINCT provincia FROM datos_uis WHERE provincia IS NOT NULL ORDER BY provincia"
+        query = """
+            SELECT DISTINCT provincia FROM datos_uis WHERE provincia IS NOT NULL
+            UNION
+            SELECT DISTINCT provincia FROM apartments WHERE provincia IS NOT NULL
+            ORDER BY provincia
+        """
         df = pd.read_sql(query, conn)
         return df['provincia'].tolist()
     finally:
@@ -623,37 +610,52 @@ def cargar_provincias() -> List[str]:
 
 @st.cache_data(ttl=300, max_entries=50)
 def cargar_datos_por_provincia(provincia: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Carga datos de una provincia específica con columnas esenciales"""
+    """Carga datos de una provincia específica desde datos_uis + apartments (prioridad datos_uis)"""
     conn = obtener_conexion()
     try:
-        # Solo columnas necesarias para el mapa
-        query_uis = f"""
+        # Unión de ambas tablas: datos_uis tiene prioridad, apartments aporta los que faltan
+        query_uis = """
             SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero
+                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+                   'datos_uis' AS fuente
             FROM datos_uis 
             WHERE provincia = %s 
-            AND latitud IS NOT NULL 
-            AND longitud IS NOT NULL
-            AND latitud != 0 
-            AND longitud != 0
-            LIMIT 3000  -- Limite de seguridad
-        """
+            AND latitud IS NOT NULL AND longitud IS NOT NULL
+            AND latitud != 0 AND longitud != 0
 
-        query_comercial = f"""
-            SELECT apartment_id, comercial, serviciable, incidencia, contrato
-            FROM comercial_rafa c
-            WHERE EXISTS (
+            UNION ALL
+
+            SELECT 'P' || LPAD(a.apartment_id::text, 10, '0') AS apartment_id,
+                   a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
+                   a.poblacion, a.vial, a.numero, a.parcela_catastral,
+                   NULL AS cto_id, NULL AS tipo_olt_rental,
+                   'apartments' AS fuente
+            FROM apartments a
+            WHERE a.provincia = %s
+            AND a.lat IS NOT NULL AND a.lng IS NOT NULL
+            AND a.lat != 0 AND a.lng != 0
+            AND NOT EXISTS (
                 SELECT 1 FROM datos_uis d 
-                WHERE d.apartment_id = c.apartment_id 
-                AND d.provincia = %s
+                WHERE d.apartment_id = 'P' || LPAD(a.apartment_id::text, 10, '0')
             )
         """
 
-        datos_uis = pd.read_sql(query_uis, conn, params=(provincia,))
-        comercial_rafa = pd.read_sql(query_comercial, conn, params=(provincia,))
+        query_comercial = """
+            SELECT apartment_id, comercial, serviciable, incidencia, contrato,
+                   observaciones, motivo_serviciable, latitud AS lat_comercial, 
+                   longitud AS lon_comercial
+            FROM comercial_rafa
+            WHERE apartment_id IN (
+                SELECT apartment_id FROM datos_uis WHERE provincia = %s
+                UNION
+                SELECT 'P' || LPAD(apartment_id::text, 10, '0') FROM apartments WHERE provincia = %s
+            )
+        """
 
-        # Optimizar tipos de datos
-        if not datos_uis.empty and 'latitud' in datos_uis.columns and 'longitud' in datos_uis.columns:
+        datos_uis = pd.read_sql(query_uis, conn, params=(provincia, provincia))
+        comercial_rafa = pd.read_sql(query_comercial, conn, params=(provincia, provincia))
+
+        if not datos_uis.empty and 'latitud' in datos_uis.columns:
             datos_uis[['latitud', 'longitud']] = datos_uis[['latitud', 'longitud']].astype(float)
 
         return datos_uis, comercial_rafa
@@ -663,22 +665,38 @@ def cargar_datos_por_provincia(provincia: str) -> Tuple[pd.DataFrame, pd.DataFra
 
 @st.cache_data(ttl=300, max_entries=10)
 def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Carga datos limitados para vista inicial rápida"""
+    """Carga datos limitados para vista inicial rápida (ambas tablas)"""
     conn = obtener_conexion()
     try:
-        # Solo primeros 500 registros para carga rápida
         query_uis = """
             SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero
+                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+                   'datos_uis' AS fuente
             FROM datos_uis 
-            WHERE latitud IS NOT NULL 
-            AND longitud IS NOT NULL
-            AND latitud != 0 
-            AND longitud != 0
+            WHERE latitud IS NOT NULL AND longitud IS NOT NULL
+            AND latitud != 0 AND longitud != 0
+
+            UNION ALL
+
+            SELECT 'P' || LPAD(a.apartment_id::text, 10, '0') AS apartment_id,
+                   a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
+                   a.poblacion, a.vial, a.numero, a.parcela_catastral,
+                   NULL AS cto_id, NULL AS tipo_olt_rental,
+                   'apartments' AS fuente
+            FROM apartments a
+            WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL
+            AND a.lat != 0 AND a.lng != 0
+            AND NOT EXISTS (
+                SELECT 1 FROM datos_uis d 
+                WHERE d.apartment_id = 'P' || LPAD(a.apartment_id::text, 10, '0')
+            )
+            LIMIT 500
         """
 
         query_comercial = """
-            SELECT apartment_id, comercial, serviciable, incidencia, contrato
+            SELECT apartment_id, comercial, serviciable, incidencia, contrato,
+                   observaciones, motivo_serviciable, latitud AS lat_comercial,
+                   longitud AS lon_comercial
             FROM comercial_rafa
             LIMIT 1000
         """
@@ -686,7 +704,7 @@ def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
         datos_uis = pd.read_sql(query_uis, conn)
         comercial_rafa = pd.read_sql(query_comercial, conn)
 
-        if not datos_uis.empty and 'latitud' in datos_uis.columns and 'longitud' in datos_uis.columns:
+        if not datos_uis.empty and 'latitud' in datos_uis.columns:
             datos_uis[['latitud', 'longitud']] = datos_uis[['latitud', 'longitud']].astype(float)
 
         return datos_uis, comercial_rafa
@@ -696,28 +714,45 @@ def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 @st.cache_data(ttl=300)
 def buscar_por_id(apartment_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Búsqueda optimizada por ID de apartment"""
+    """Búsqueda optimizada por ID en datos_uis + apartments"""
     conn = obtener_conexion()
     try:
-        query_uis = f"""
+        # Buscar en datos_uis primero (prioridad), luego apartments
+        query_uis = """
             SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero
+                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+                   'datos_uis' AS fuente
             FROM datos_uis 
             WHERE apartment_id = %s 
-            AND latitud IS NOT NULL 
-            AND longitud IS NOT NULL
+            AND latitud IS NOT NULL AND longitud IS NOT NULL
+
+            UNION ALL
+
+            SELECT 'P' || LPAD(a.apartment_id::text, 10, '0') AS apartment_id,
+                   a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
+                   a.poblacion, a.vial, a.numero, a.parcela_catastral,
+                   NULL AS cto_id, NULL AS tipo_olt_rental,
+                   'apartments' AS fuente
+            FROM apartments a
+            WHERE 'P' || LPAD(a.apartment_id::text, 10, '0') = %s
+            AND a.lat IS NOT NULL AND a.lng IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM datos_uis d WHERE d.apartment_id = %s
+            )
         """
 
-        query_comercial = f"""
-            SELECT apartment_id, comercial, serviciable, incidencia, contrato
+        query_comercial = """
+            SELECT apartment_id, comercial, serviciable, incidencia, contrato,
+                   observaciones, motivo_serviciable, latitud AS lat_comercial,
+                   longitud AS lon_comercial
             FROM comercial_rafa
             WHERE apartment_id = %s
         """
 
-        datos_uis = pd.read_sql(query_uis, conn, params=(apartment_id,))
+        datos_uis = pd.read_sql(query_uis, conn, params=(apartment_id, apartment_id, apartment_id))
         comercial_rafa = pd.read_sql(query_comercial, conn, params=(apartment_id,))
 
-        if not datos_uis.empty and 'latitud' in datos_uis.columns and 'longitud' in datos_uis.columns:
+        if not datos_uis.empty and 'latitud' in datos_uis.columns:
             datos_uis[['latitud', 'longitud']] = datos_uis[['latitud', 'longitud']].astype(float)
 
         return datos_uis, comercial_rafa
@@ -726,38 +761,65 @@ def buscar_por_id(apartment_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 
-def cargar_datos_por_bounds(south, north, west, east, limit=5000):
-    """Carga datos solo dentro del area visible del mapa (bounds)"""
+def cargar_datos_por_bounds(south, north, west, east, limit=50000):
+    """Carga datos dentro del area visible del mapa desde ambas tablas"""
     conn = obtener_conexion()
     try:
         query_uis = """
             SELECT apartment_id, latitud, longitud, provincia, municipio,
-                   poblacion, vial, numero
+                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+                   'datos_uis' AS fuente
             FROM datos_uis
             WHERE latitud BETWEEN %s AND %s
             AND longitud BETWEEN %s AND %s
-            AND latitud IS NOT NULL
-            AND longitud IS NOT NULL
-            AND latitud != 0
-            AND longitud != 0
+            AND latitud IS NOT NULL AND longitud IS NOT NULL
+            AND latitud != 0 AND longitud != 0
+
+            UNION ALL
+
+            SELECT 'P' || LPAD(a.apartment_id::text, 10, '0') AS apartment_id,
+                   a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
+                   a.poblacion, a.vial, a.numero, a.parcela_catastral,
+                   NULL AS cto_id, NULL AS tipo_olt_rental,
+                   'apartments' AS fuente
+            FROM apartments a
+            WHERE a.lat BETWEEN %s AND %s
+            AND a.lng BETWEEN %s AND %s
+            AND a.lat IS NOT NULL AND a.lng IS NOT NULL
+            AND a.lat != 0 AND a.lng != 0
+            AND NOT EXISTS (
+                SELECT 1 FROM datos_uis d 
+                WHERE d.apartment_id = 'P' || LPAD(a.apartment_id::text, 10, '0')
+            )
             LIMIT %s
         """
 
         query_comercial = """
-            SELECT apartment_id, comercial, serviciable, incidencia, contrato
+            SELECT apartment_id, comercial, serviciable, incidencia, contrato,
+                   observaciones, motivo_serviciable, latitud AS lat_comercial,
+                   longitud AS lon_comercial
             FROM comercial_rafa
             WHERE apartment_id IN (
                 SELECT apartment_id FROM datos_uis
-                WHERE latitud BETWEEN %s AND %s
-                AND longitud BETWEEN %s AND %s
+                WHERE latitud BETWEEN %s AND %s AND longitud BETWEEN %s AND %s
                 AND latitud IS NOT NULL AND longitud IS NOT NULL
+                UNION
+                SELECT 'P' || LPAD(apartment_id::text, 10, '0') FROM apartments
+                WHERE lat BETWEEN %s AND %s AND lng BETWEEN %s AND %s
             )
         """
 
-        datos_uis = pd.read_sql(query_uis, conn, params=(south, north, west, east, limit))
-        comercial_rafa = pd.read_sql(query_comercial, conn, params=(south, north, west, east))
+        datos_uis = pd.read_sql(query_uis, conn, params=(
+            south, north, west, east,
+            south, north, west, east,
+            limit
+        ))
+        comercial_rafa = pd.read_sql(query_comercial, conn, params=(
+            south, north, west, east,
+            south, north, west, east
+        ))
 
-        if not datos_uis.empty and 'latitud' in datos_uis.columns and 'longitud' in datos_uis.columns:
+        if not datos_uis.empty and 'latitud' in datos_uis.columns:
             datos_uis[['latitud', 'longitud']] = datos_uis[['latitud', 'longitud']].astype(float)
 
         return datos_uis, comercial_rafa
@@ -774,7 +836,11 @@ def crear_diccionarios_optimizados(comercial_df: pd.DataFrame) -> Dict:
         'serviciable': {},
         'contrato': {},
         'incidencia': {},
-        'comercial': {}
+        'comercial': {},
+        'observaciones': {},
+        'motivo_serviciable': {},
+        'lat_comercial': {},
+        'lon_comercial': {}
     }
 
     if comercial_df.empty:
@@ -783,7 +849,6 @@ def crear_diccionarios_optimizados(comercial_df: pd.DataFrame) -> Dict:
     # Crear diccionarios solo para columnas que existen
     for columna in dicts.keys():
         if columna in comercial_df.columns:
-            # Usar vectorización para mejor rendimiento
             mask = comercial_df[columna].notna()
             if mask.any():
                 subset = comercial_df[mask]
@@ -1140,8 +1205,13 @@ def mapa_seccion():
         with st.spinner("⏳ Cargando vista previa..."):
             datos_filtrados, comercial_filtradas = cargar_datos_limitados()
 
-            if not datos_filtrados.empty:
-                st.toast(f"✅ Puntos cargados: {len(datos_filtrados)} apartments")
+        if not datos_filtrados.empty:
+            # Contar por fuente
+            fuente_counts = datos_filtrados['fuente'].value_counts() if 'fuente' in datos_filtrados.columns else {}
+            duis_count = fuente_counts.get('datos_uis', 0)
+            apt_count = fuente_counts.get('apartments', 0)
+            fuente_text = f" (📋 {duis_count:,} datos_uis + 🏗️ {apt_count:,} apartments)" if apt_count > 0 else ""
+            st.toast(f"✅ Puntos cargados: {len(datos_filtrados):,}{fuente_text}")
 
     # ===== VERIFICACIÓN Y PROCESAMIENTO DE DATOS =====
 
@@ -1222,120 +1292,384 @@ def mapa_seccion():
         center_lon = float(datos_filtrados['longitud'].mean())
         zoom_start = zoom_inicial
 
-    # Crear mapa
-    with st.spinner("🗺️ Generando mapa..."):
-        m = folium.Map(
-            location=[center_lat, center_lon],
-            zoom_start=zoom_start,
-            max_zoom=21,
-            tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
-            attr="Google Satellite",
-            control_scale=True
-        )
+    # ===== MAPA LEAFLET CANVAS (alto rendimiento, 700K+ puntos) =====
+    with st.spinner("🗺️ Preparando datos del mapa..."):
 
-        # Añadir plugins
-        if mostrar_clusters and len(datos_filtrados) > 10:
-            cluster_layer = MarkerCluster(
-                max_cluster_radius=80,
-                min_cluster_size=2,
-                disable_clustering_at_zoom=16
-            ).add_to(m)
-            layer = cluster_layer
-        else:
-            layer = m
+        # Preparar datos como lista de dicts para JSON
+        import html as html_mod
 
-        Geocoder(collapsed=True, position='topright').add_to(m)
-        Fullscreen(position='topright').add_to(m)
-
-        # Añadir leyenda al mapa si está activado
-        if mostrar_leyenda:
-            agregar_leyenda_al_mapa(m)
-
-        # Manejar coordenadas duplicadas
+        points_data = []
+        # Pre-calcular offsets para coordenadas duplicadas
         coord_counts = {}
         for _, row in datos_filtrados.iterrows():
             coord = (round(row['latitud'], 6), round(row['longitud'], 6))
             coord_counts[coord] = coord_counts.get(coord, 0) + 1
 
-        # Añadir marcadores
-        markers_added = 0
+        # Reset counts for offset application
+        coord_offsets = dict(coord_counts)
+
         for _, row in datos_filtrados.iterrows():
-            apt_id = row['apartment_id']
+            apt_id = str(row['apartment_id'])
             lat = float(row['latitud'])
             lon = float(row['longitud'])
 
-            # Aplicar offset si hay duplicados
+            # Offset duplicados
             coord_key = (round(lat, 6), round(lon, 6))
-            if coord_counts.get(coord_key, 0) > 1:
-                offset = coord_counts[coord_key] * 0.00002
+            if coord_offsets.get(coord_key, 0) > 1:
+                offset = coord_offsets[coord_key] * 0.00002
                 lat += offset
                 lon -= offset
-                coord_counts[coord_key] -= 1
+                coord_offsets[coord_key] -= 1
 
             # Determinar color
             serv_uis = str(row.get('serviciable', '')).lower().strip() if 'serviciable' in row else ''
             color, estado = determinar_color_marcador(apt_id, serv_uis, dicts)
 
-            # Crear popup
-            popup_html = f"""
-            <div style="font-family: Arial; max-width: 250px;">
-                <div style="background: #2c3e50; color: white; padding: 8px; border-radius: 5px 5px 0 0;">
-                    <strong>🏠 {apt_id}</strong>
-                </div>
-                <div style="padding: 10px;">
-                    <div><strong>📍 Ubicación:</strong></div>
-                    <div>{row.get('provincia', '')}</div>
-                    <div>{row.get('municipio', '')} - {row.get('poblacion', '')}</div>
-                    <div style="margin-top: 5px;">{row.get('vial', '')} {row.get('numero', '')}</div>
-                    <div style="color: #666; font-size: 11px; margin-top: 5px;">
-                        📍 {lat:.6f}, {lon:.6f}
-                    </div>
-            """
+            # Color mapping para canvas
+            color_hex = {
+                'green': '#27ae60', 'red': '#e74c3c', 'orange': '#f39c12',
+                'purple': '#8e44ad', 'gray': '#95a5a6', 'blue': '#3498db'
+            }.get(color, '#3498db')
 
-            # Añadir info comercial si existe
-            if apt_id in dicts.get('comercial', {}) or apt_id in dicts.get('serviciable', {}):
-                popup_html += '<hr style="margin: 10px 0;"><div><strong>👤 Datos:</strong></div>'
+            # Helper para limpiar nan/None
+            def clean(val):
+                v = str(val) if pd.notna(val) else ''
+                return '' if v.lower() in ('nan', 'none', '') else v
 
-                if apt_id in dicts.get('comercial', {}):
-                    popup_html += f"<div>Comercial: {dicts['comercial'][apt_id]}</div>"
+            point = {
+                'id': apt_id, 'lat': lat, 'lon': lon, 'c': color_hex, 'e': estado,
+                'prov': clean(row.get('provincia', '')),
+                'mun': clean(row.get('municipio', '')),
+                'pob': clean(row.get('poblacion', '')),
+                'via': clean(row.get('vial', '')),
+                'num': clean(row.get('numero', '')),
+                'fuente': clean(row.get('fuente', '')),
+            }
 
-                if apt_id in dicts.get('serviciable', {}):
-                    serv_value = dicts['serviciable'][apt_id].title()
-                    popup_html += f"<div>Serviciable: {serv_value}</div>"
+            # Campos extra de datos_uis
+            pc = clean(row.get('parcela_catastral', ''))
+            if pc:
+                point['pc'] = pc
+            cto = clean(row.get('cto_id', ''))
+            if cto:
+                point['cto'] = cto
+            tor = clean(row.get('tipo_olt_rental', ''))
+            if tor:
+                point['tor'] = tor
 
-            popup_html += "</div></div>"
+            # Info comercial compacta
+            if apt_id in dicts.get('comercial', {}):
+                point['com'] = dicts['comercial'][apt_id]
+            if apt_id in dicts.get('serviciable', {}):
+                point['srv'] = dicts['serviciable'][apt_id]
+            if apt_id in dicts.get('contrato', {}):
+                point['ctr'] = dicts['contrato'][apt_id]
+            if apt_id in dicts.get('motivo_serviciable', {}):
+                point['msrv'] = dicts['motivo_serviciable'][apt_id]
+            if apt_id in dicts.get('observaciones', {}):
+                obs = dicts['observaciones'][apt_id]
+                if len(obs) > 120:
+                    obs = obs[:120] + '...'
+                point['obs'] = obs
+            if apt_id in dicts.get('lat_comercial', {}):
+                point['latc'] = dicts['lat_comercial'][apt_id]
+            if apt_id in dicts.get('lon_comercial', {}):
+                point['lonc'] = dicts['lon_comercial'][apt_id]
 
-            # Crear marcador
-            folium.Marker(
-                location=[lat, lon],
-                popup=folium.Popup(popup_html, max_width=300),
-                tooltip=f"🏠 {apt_id}",
-                icon=folium.Icon(color=color, icon="home", prefix="fa")
-            ).add_to(layer)
+            points_data.append(point)
 
-            markers_added += 1
+        points_json = json.dumps(points_data, ensure_ascii=False)
 
-            # Límite de rendimiento
-            #if markers_added >= 1000:
-            #    st.warning("⚠️ Mostrando primeros 1000 puntos por rendimiento")
-            #    break
+        # Configuración del mapa
+        show_clusters_js = "true" if (mostrar_clusters and len(datos_filtrados) > 10) else "false"
+        show_legend_js = "true" if mostrar_leyenda else "false"
 
-        # Renderizar mapa
-        map_data = st_folium(
-            m,
-            height=600,
-            width='stretch',
-            returned_objects=["last_object_clicked_tooltip"]
-        )
+        leaflet_html = f"""
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body, #map {{ width:100%; height:100%; }}
+  .info-panel {{
+    position:absolute; top:10px; right:10px; z-index:1000;
+    background:white; border-radius:8px; box-shadow:0 2px 12px rgba(0,0,0,.3);
+    max-width:320px; max-height:80vh; overflow-y:auto; display:none;
+    font-family:Arial,sans-serif; font-size:13px;
+  }}
+  .info-panel .header {{
+    background:#2c3e50; color:white; padding:10px 14px; border-radius:8px 8px 0 0;
+    display:flex; justify-content:space-between; align-items:center;
+    position:sticky; top:0;
+  }}
+  .info-panel .header .close {{ cursor:pointer; font-size:18px; opacity:.8; }}
+  .info-panel .header .close:hover {{ opacity:1; }}
+  .info-panel .body {{ padding:12px 14px; }}
+  .info-panel .body .row {{ margin-bottom:6px; }}
+  .info-panel .body .label {{ color:#7f8c8d; font-size:11px; text-transform:uppercase; }}
+  .info-panel .body .value {{ font-weight:600; }}
+  .info-panel .body hr {{ border:none; border-top:1px solid #ecf0f1; margin:10px 0; }}
+  .legend {{
+    position:absolute; bottom:30px; left:10px; z-index:1000;
+    background:rgba(255,255,255,.92); border-radius:6px; padding:10px 14px;
+    box-shadow:0 1px 6px rgba(0,0,0,.2); font:12px Arial,sans-serif;
+  }}
+  .legend .item {{ display:flex; align-items:center; margin:3px 0; }}
+  .legend .dot {{ width:12px; height:12px; border-radius:50%; margin-right:8px; flex-shrink:0; }}
+  .search-box {{
+    position:absolute; top:10px; left:50px; z-index:1000;
+    background:white; border-radius:6px; box-shadow:0 1px 6px rgba(0,0,0,.2);
+    padding:6px 10px; display:flex; align-items:center;
+  }}
+  .search-box input {{
+    border:none; outline:none; font-size:13px; width:200px; font-family:Arial;
+  }}
+  .stats-bar {{
+    position:absolute; bottom:30px; right:10px; z-index:1000;
+    background:rgba(255,255,255,.92); border-radius:6px; padding:8px 12px;
+    box-shadow:0 1px 6px rgba(0,0,0,.2); font:11px Arial,sans-serif; color:#555;
+  }}
+  /* Cluster styling override for better contrast on satellite */
+  .marker-cluster-small {{ background-color:rgba(52,152,219,.6); }}
+  .marker-cluster-small div {{ background-color:rgba(52,152,219,.8); color:#fff; }}
+  .marker-cluster-medium {{ background-color:rgba(243,156,18,.6); }}
+  .marker-cluster-medium div {{ background-color:rgba(243,156,18,.8); color:#fff; }}
+  .marker-cluster-large {{ background-color:rgba(231,76,60,.6); }}
+  .marker-cluster-large div {{ background-color:rgba(231,76,60,.8); color:#fff; }}
+</style>
+</head><body>
+<div id="map"></div>
 
-        # Manejar clic en marcador
-        if map_data and map_data.get("last_object_clicked_tooltip"):
-            mostrar_info_detallada(
-                map_data["last_object_clicked_tooltip"],
-                datos_filtrados,
-                comercial_filtradas,
-                dicts
-            )
+<div class="info-panel" id="infoPanel">
+  <div class="header">
+    <strong id="infoTitle">🏠</strong>
+    <span class="close" onclick="closePanel()">✕</span>
+  </div>
+  <div class="body" id="infoBody"></div>
+</div>
+
+<div class="search-box" id="searchBox">
+  <span style="margin-right:6px;">🔍</span>
+  <input type="text" id="searchInput" placeholder="Buscar Apartment ID..." />
+</div>
+
+<div class="stats-bar" id="statsBar"></div>
+
+<script>
+// ===== DATA =====
+var POINTS = {points_json};
+var USE_CLUSTERS = {show_clusters_js};
+var SHOW_LEGEND = {show_legend_js};
+
+// ===== MAP INIT =====
+var map = L.map('map', {{
+  center: [{center_lat}, {center_lon}],
+  zoom: {zoom_start},
+  maxZoom: 21,
+  preferCanvas: true,
+  renderer: L.canvas({{ padding: 0.5 }})
+}});
+
+L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={{x}}&y={{y}}&z={{z}}', {{
+  attribution: 'Google Satellite',
+  maxZoom: 21
+}}).addTo(map);
+
+// ===== LEGEND =====
+if (SHOW_LEGEND) {{
+  var legendDiv = document.createElement('div');
+  legendDiv.className = 'legend';
+  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Leyenda</strong>' +
+    '<div class="item"><div class="dot" style="background:#27ae60"></div>Serviciable</div>' +
+    '<div class="item"><div class="dot" style="background:#e74c3c"></div>No serviciable</div>' +
+    '<div class="item"><div class="dot" style="background:#f39c12"></div>Contratado</div>' +
+    '<div class="item"><div class="dot" style="background:#8e44ad"></div>Incidencia</div>' +
+    '<div class="item"><div class="dot" style="background:#95a5a6"></div>No interesado</div>' +
+    '<div class="item"><div class="dot" style="background:#3498db"></div>No visitado</div>';
+  document.body.appendChild(legendDiv);
+}}
+
+// ===== STATS =====
+document.getElementById('statsBar').textContent = POINTS.length.toLocaleString() + ' puntos cargados';
+
+// ===== BUILD MARKERS =====
+var canvasRenderer = L.canvas({{ padding: 0.5 }});
+var markerIndex = {{}};  // apt_id -> marker for search
+
+function buildPopupContent(p) {{
+  var estado = p.e.replace(/_/g,' ');
+  estado = estado.charAt(0).toUpperCase() + estado.slice(1);
+  var fuente = p.fuente === 'datos_uis' ? '📋 datos_uis' : '🏗️ apartments';
+
+  var h = '<div class="row"><span class="label">Ubicación</span><div class="value">' +
+    p.prov + '</div><div>' + p.mun + ' - ' + p.pob + '</div><div>' + p.via + ' ' + p.num + '</div>' +
+    '<div style="color:#999;font-size:11px;margin-top:3px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
+
+  // Datos técnicos de datos_uis
+  if (p.pc || p.cto || p.tor) {{
+    h += '<hr><div class="row"><span class="label">Datos Técnicos</span></div>';
+    if (p.pc) h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + p.pc + '</div></div>';
+    if (p.cto) h += '<div class="row"><span class="label">CTO</span><div class="value">' + p.cto + '</div></div>';
+    if (p.tor) h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + p.tor + '</div></div>';
+  }}
+
+  // Estado y datos comerciales
+  h += '<hr><div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
+
+  if (p.com) h += '<div class="row"><span class="label">Comercial</span><div class="value">' + p.com + '</div></div>';
+  if (p.srv) {{
+    var sv = p.srv.charAt(0).toUpperCase() + p.srv.slice(1);
+    h += '<div class="row"><span class="label">Serviciable</span><div class="value">' + sv + '</div></div>';
+  }}
+  if (p.msrv) h += '<div class="row"><span class="label">Motivo Serviciable</span><div class="value">' + p.msrv + '</div></div>';
+  if (p.ctr) {{
+    var ct = p.ctr.charAt(0).toUpperCase() + p.ctr.slice(1);
+    h += '<div class="row"><span class="label">Contrato</span><div class="value">' + ct + '</div></div>';
+  }}
+  if (p.obs) h += '<div class="row"><span class="label">Observaciones</span><div style="font-size:12px;color:#555;">' + p.obs + '</div></div>';
+
+  // Coordenadas comercial (si difieren)
+  if (p.latc && p.lonc) {{
+    h += '<hr><div class="row"><span class="label">Coords. Comercial</span>' +
+      '<div style="color:#999;font-size:11px;">📍 ' + p.latc + ', ' + p.lonc + '</div></div>';
+  }}
+
+  // Fuente
+  h += '<hr><div style="text-align:right;font-size:10px;color:#aaa;">' + fuente + '</div>';
+
+  return h;
+}}
+
+function showPanel(p) {{
+  document.getElementById('infoTitle').textContent = '🏠 ' + p.id;
+  document.getElementById('infoBody').innerHTML = buildPopupContent(p);
+  document.getElementById('infoPanel').style.display = 'block';
+}}
+
+function closePanel() {{
+  document.getElementById('infoPanel').style.display = 'none';
+}}
+
+// Create all markers
+var allMarkers = [];
+var chunk = 5000;
+var idx = 0;
+
+function addChunk() {{
+  var end = Math.min(idx + chunk, POINTS.length);
+  for (var i = idx; i < end; i++) {{
+    var p = POINTS[i];
+    var m = L.circleMarker([p.lat, p.lon], {{
+      renderer: canvasRenderer,
+      radius: 6,
+      fillColor: p.c,
+      color: '#fff',
+      weight: 1.5,
+      opacity: 1,
+      fillOpacity: 0.85
+    }});
+    m._ptData = p;
+    m.on('click', function(e) {{
+      showPanel(this._ptData);
+      map.setView(e.latlng, Math.max(map.getZoom(), 16));
+    }});
+    allMarkers.push(m);
+    markerIndex[p.id] = m;
+  }}
+  idx = end;
+  if (idx < POINTS.length) {{
+    // Update progress
+    document.getElementById('statsBar').textContent =
+      'Cargando... ' + idx.toLocaleString() + ' / ' + POINTS.length.toLocaleString();
+    requestAnimationFrame(addChunk);
+  }} else {{
+    finishLoading();
+  }}
+}}
+
+function finishLoading() {{
+  if (USE_CLUSTERS) {{
+    var clusterGroup = L.markerClusterGroup({{
+      maxClusterRadius: 80,
+      disableClusteringAtZoom: 16,
+      chunkedLoading: true,
+      chunkInterval: 100,
+      chunkDelay: 10,
+      spiderfyOnMaxZoom: false,
+      showCoverageOnHover: false,
+      animate: false,
+      removeOutsideVisibleBounds: true
+    }});
+    for (var i = 0; i < allMarkers.length; i++) {{
+      clusterGroup.addLayer(allMarkers[i]);
+    }}
+    map.addLayer(clusterGroup);
+  }} else {{
+    var group = L.layerGroup(allMarkers);
+    group.addTo(map);
+  }}
+  document.getElementById('statsBar').textContent =
+    POINTS.length.toLocaleString() + ' puntos cargados ✓';
+}}
+
+// Start chunked loading
+addChunk();
+
+// ===== SEARCH =====
+var searchInput = document.getElementById('searchInput');
+var searchTimeout;
+searchInput.addEventListener('input', function() {{
+  clearTimeout(searchTimeout);
+  var val = this.value.trim().toUpperCase();
+  searchTimeout = setTimeout(function() {{
+    if (val.length < 3) return;
+    // Find matching marker
+    for (var id in markerIndex) {{
+      if (id.toUpperCase().indexOf(val) !== -1) {{
+        var mk = markerIndex[id];
+        var ll = mk.getLatLng();
+        map.setView(ll, 18);
+        showPanel(mk._ptData);
+        // Flash effect
+        mk.setStyle({{ radius: 14, weight: 3 }});
+        setTimeout(function() {{ mk.setStyle({{ radius: 6, weight: 1.5 }}); }}, 1500);
+        break;
+      }}
+    }}
+  }}, 300);
+}});
+
+// ===== FULLSCREEN =====
+map.addControl(new (L.Control.extend({{
+  options: {{ position: 'topright' }},
+  onAdd: function() {{
+    var btn = L.DomUtil.create('div', 'leaflet-bar');
+    btn.innerHTML = '<a href="#" style="font-size:18px;line-height:26px;width:26px;height:26px;display:block;text-align:center;text-decoration:none;color:#333;" title="Pantalla completa">⛶</a>';
+    btn.onclick = function(e) {{
+      e.preventDefault(); e.stopPropagation();
+      var el = document.documentElement;
+      if (!document.fullscreenElement) el.requestFullscreen();
+      else document.exitFullscreen();
+    }};
+    return btn;
+  }}
+}}))());
+
+// Close panel on Escape
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') closePanel();
+}});
+</script>
+</body></html>"""
+
+        import streamlit.components.v1 as components
+        components.html(leaflet_html, height=620, scrolling=False)
 
     # ===== ACCIONES RÁPIDAS =====
     col_a1, col_a2, col_a3 = st.columns(3)
