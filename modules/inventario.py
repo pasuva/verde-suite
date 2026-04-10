@@ -10,7 +10,7 @@ from modules.db import get_db_connection as _db_conn
 from modules import login
 from modules.minIO import upload_image_to_cloudinary
 
-st.set_page_config(layout="wide", page_title="Inventario Oficina")
+#st.set_page_config(layout="wide", page_title="Inventario Oficina")
 # ==================== CONEXIÓN BD ====================
 def get_db_connection():
     return _db_conn()
