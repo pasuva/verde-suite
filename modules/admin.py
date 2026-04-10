@@ -1084,7 +1084,7 @@ def mapa_seccion():
     with col1:
         apartment_search = st.text_input(
             "Buscar por Apartment ID",
-            placeholder="Ej: APT123456",
+            placeholder="Ej: P0004515162",
             help="Busca un apartment específico por su ID",
             key="search_id_input"
         )
@@ -1151,8 +1151,11 @@ def mapa_seccion():
                     st.toast(f"❌ No se encontró el Apartment ID: {apartment_search}")
                     return
             else:
-                # Búsqueda parcial - cargar datos limitados primero
-                datos_uis, comercial_rafa_df = cargar_datos_limitados()
+                # Búsqueda parcial dentro de la provincia seleccionada si hay una
+                if provincia_sel != "Selecciona provincia":
+                    datos_uis, comercial_rafa_df = cargar_datos_por_provincia(provincia_sel)
+                else:
+                    datos_uis, comercial_rafa_df = cargar_datos_limitados()
                 mask = datos_uis['apartment_id'].astype(str).str.contains(apartment_search, case=False, na=False)
                 datos_filtrados = datos_uis[mask]
                 comercial_filtradas = comercial_rafa_df[
@@ -1160,8 +1163,7 @@ def mapa_seccion():
 
                 if datos_filtrados.empty:
                     st.warning(f"⚠️ No se encontraron coincidencias para: {apartment_search}")
-                    # Mostrar vista limitada por defecto
-                    datos_filtrados, comercial_filtradas = cargar_datos_limitados()
+                    return
                 else:
                     st.toast(f"✅ Encontradas {len(datos_filtrados)} coincidencias")
 
@@ -1172,8 +1174,7 @@ def mapa_seccion():
 
             if datos_uis.empty:
                 st.warning(f"⚠️ No hay datos para {provincia_sel}")
-                # Cargar vista limitada
-                datos_filtrados, comercial_filtradas = cargar_datos_limitados()
+                return
             else:
                 datos_filtrados = datos_uis
                 comercial_filtradas = comercial_rafa_df
@@ -1197,21 +1198,416 @@ def mapa_seccion():
                         if poblacion_sel and poblacion_sel != "Todas":
                             datos_filtrados = datos_filtrados[datos_filtrados['poblacion'] == poblacion_sel]
 
-    # Opción 3: Vista inicial (sin filtros)
+    # Opción 3: Vista inicial — mapa con carga dinámica por viewport (tipo Google Maps)
     else:
-        st.info("👆 Selecciona una provincia o busca por ID para cargar datos")
+        show_legend_js = "true" if mostrar_leyenda else "false"
+        show_clusters_js = "true" if mostrar_clusters else "false"
 
-        # Cargar datos limitados para vista previa
-        with st.spinner("⏳ Cargando vista previa..."):
-            datos_filtrados, comercial_filtradas = cargar_datos_limitados()
+        viewport_map_html = f"""
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body, #map {{ width:100%; height:100%; }}
+  .info-panel {{
+    position:absolute; top:10px; right:10px; z-index:1000;
+    background:white; border-radius:8px; box-shadow:0 2px 12px rgba(0,0,0,.3);
+    max-width:340px; max-height:80vh; overflow-y:auto; display:none;
+    font-family:Arial,sans-serif; font-size:13px;
+  }}
+  .info-panel .header {{
+    background:#2c3e50; color:white; padding:10px 14px; border-radius:8px 8px 0 0;
+    display:flex; justify-content:space-between; align-items:center;
+    position:sticky; top:0;
+  }}
+  .info-panel .header .close {{ cursor:pointer; font-size:18px; opacity:.8; }}
+  .info-panel .header .close:hover {{ opacity:1; }}
+  .info-panel .body {{ padding:12px 14px; }}
+  .info-panel .body .row {{ margin-bottom:6px; }}
+  .info-panel .body .label {{ color:#7f8c8d; font-size:11px; text-transform:uppercase; }}
+  .info-panel .body .value {{ font-weight:600; }}
+  .info-panel .body hr {{ border:none; border-top:1px solid #ecf0f1; margin:10px 0; }}
+  .info-panel .body .section-title {{ color:#2c3e50; font-weight:700; font-size:12px; margin-bottom:4px; }}
+  .legend {{
+    position:absolute; bottom:30px; left:10px; z-index:1000;
+    background:rgba(255,255,255,.92); border-radius:6px; padding:10px 14px;
+    box-shadow:0 1px 6px rgba(0,0,0,.2); font:12px Arial,sans-serif;
+  }}
+  .legend .item {{ display:flex; align-items:center; margin:3px 0; }}
+  .legend .dot {{ width:12px; height:12px; border-radius:50%; margin-right:8px; flex-shrink:0; }}
+  .search-box {{
+    position:absolute; top:10px; left:50px; z-index:1000;
+    background:white; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.25);
+    padding:0; display:flex; flex-direction:column; width:280px;
+  }}
+  .search-box .input-row {{ display:flex; align-items:center; padding:8px 10px; }}
+  .search-box input {{ border:none; outline:none; font-size:13px; width:100%; font-family:Arial; }}
+  .search-box .results {{
+    max-height:200px; overflow-y:auto; border-top:1px solid #eee; display:none;
+  }}
+  .search-box .results .result-item {{
+    padding:8px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid #f5f5f5;
+  }}
+  .search-box .results .result-item:hover {{ background:#f0f7ff; }}
+  .search-box .results .result-type {{ font-size:10px; color:#999; text-transform:uppercase; }}
+  .stats-bar {{
+    position:absolute; bottom:30px; right:10px; z-index:1000;
+    background:rgba(255,255,255,.92); border-radius:6px; padding:8px 12px;
+    box-shadow:0 1px 6px rgba(0,0,0,.2); font:11px Arial,sans-serif; color:#555;
+  }}
+  .zoom-msg {{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:999;
+    background:rgba(255,255,255,.92); border-radius:10px; padding:16px 24px;
+    box-shadow:0 2px 12px rgba(0,0,0,.2); font-family:Arial,sans-serif;
+    text-align:center; pointer-events:none; transition:opacity .3s;
+  }}
+  .marker-cluster-small {{ background-color:rgba(52,152,219,.6); }}
+  .marker-cluster-small div {{ background-color:rgba(52,152,219,.8); color:#fff; }}
+  .marker-cluster-medium {{ background-color:rgba(243,156,18,.6); }}
+  .marker-cluster-medium div {{ background-color:rgba(243,156,18,.8); color:#fff; }}
+  .marker-cluster-large {{ background-color:rgba(231,76,60,.6); }}
+  .marker-cluster-large div {{ background-color:rgba(231,76,60,.8); color:#fff; }}
+</style>
+</head><body>
+<div id="map"></div>
 
-        if not datos_filtrados.empty:
-            # Contar por fuente
-            fuente_counts = datos_filtrados['fuente'].value_counts() if 'fuente' in datos_filtrados.columns else {}
-            duis_count = fuente_counts.get('datos_uis', 0)
-            apt_count = fuente_counts.get('apartments', 0)
-            fuente_text = f" (📋 {duis_count:,} datos_uis + 🏗️ {apt_count:,} apartments)" if apt_count > 0 else ""
-            st.toast(f"✅ Puntos cargados: {len(datos_filtrados):,}{fuente_text}")
+<div class="info-panel" id="infoPanel">
+  <div class="header">
+    <strong id="infoTitle">🏠</strong>
+    <span class="close" onclick="closePanel()">✕</span>
+  </div>
+  <div class="body" id="infoBody"></div>
+</div>
+
+<div class="search-box" id="searchBox">
+  <div class="input-row">
+    <span style="margin-right:6px;">🔍</span>
+    <input type="text" id="searchInput" placeholder="Buscar ID, dirección o coordenadas..." />
+  </div>
+  <div class="results" id="searchResults"></div>
+</div>
+
+<div class="stats-bar" id="statsBar">Acerca el zoom para ver puntos</div>
+<div class="zoom-msg" id="zoomMsg">🔍 Acerca el zoom para cargar puntos</div>
+
+<script>
+var USE_CLUSTERS = {show_clusters_js};
+var SHOW_LEGEND = {show_legend_js};
+var MIN_ZOOM = 11;
+var API_BASE = '/api/points';
+
+// ===== MAP INIT =====
+var map = L.map('map', {{
+  center: [40.4, -3.7],
+  zoom: 6,
+  maxZoom: 21,
+  preferCanvas: true
+}});
+
+L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={{x}}&y={{y}}&z={{z}}', {{
+  attribution: 'Google Satellite', maxZoom: 21
+}}).addTo(map);
+
+// ===== LEGEND =====
+if (SHOW_LEGEND) {{
+  var legendDiv = document.createElement('div');
+  legendDiv.className = 'legend';
+  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Leyenda</strong>' +
+    '<div class="item"><div class="dot" style="background:#27ae60"></div>Serviciable</div>' +
+    '<div class="item"><div class="dot" style="background:#e74c3c"></div>No serviciable</div>' +
+    '<div class="item"><div class="dot" style="background:#f39c12"></div>Contratado</div>' +
+    '<div class="item"><div class="dot" style="background:#8e44ad"></div>Incidencia</div>' +
+    '<div class="item"><div class="dot" style="background:#95a5a6"></div>No interesado</div>' +
+    '<div class="item"><div class="dot" style="background:#3498db"></div>No visitado</div>';
+  document.body.appendChild(legendDiv);
+}}
+
+// ===== STATE =====
+var canvasRenderer = L.canvas({{ padding: 0.5 }});
+var clusterGroup = null;
+var currentMarkers = [];
+var markerIndex = {{}};
+var loadedPoints = {{}};  // track loaded IDs to avoid duplicates
+var isLoading = false;
+var loadTimeout = null;
+
+// ===== POPUP =====
+function buildPopupContent(p) {{
+  var estado = p.e.replace(/_/g,' ');
+  estado = estado.charAt(0).toUpperCase() + estado.slice(1);
+  var fuente = p.fuente === 'datos_uis' ? '📋 datos_uis' : '🏗️ apartments';
+
+  var h = '<div class="section-title">📍 Ubicación</div>' +
+    '<div class="row"><div class="value">' + p.prov + '</div></div>' +
+    '<div class="row"><div>' + p.mun + ' - ' + p.pob + '</div></div>' +
+    '<div class="row"><div>' + p.via + ' ' + p.num + '</div></div>' +
+    '<div class="row"><div style="color:#999;font-size:11px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
+
+  h += '<hr><div class="section-title">📋 Datos Técnicos</div>';
+  h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + (p.pc || '—') + '</div></div>';
+  h += '<div class="row"><span class="label">CTO</span><div class="value">' + (p.cto || '—') + '</div></div>';
+  h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + (p.tor || '—') + '</div></div>';
+
+  h += '<hr><div class="section-title">📊 Estado</div>';
+  h += '<div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
+
+  h += '<hr><div class="section-title">👤 Datos Comerciales</div>';
+  h += '<div class="row"><span class="label">Comercial</span><div class="value">' + (p.com || '—') + '</div></div>';
+  var srv = p.srv ? p.srv.charAt(0).toUpperCase() + p.srv.slice(1) : '—';
+  h += '<div class="row"><span class="label">Serviciable</span><div class="value">' + srv + '</div></div>';
+  h += '<div class="row"><span class="label">Motivo Serviciable</span><div class="value">' + (p.msrv || '—') + '</div></div>';
+  var ctr = p.ctr ? p.ctr.charAt(0).toUpperCase() + p.ctr.slice(1) : '—';
+  h += '<div class="row"><span class="label">Contrato</span><div class="value">' + ctr + '</div></div>';
+  if (p.obs) h += '<div class="row"><span class="label">Observaciones</span><div style="font-size:12px;color:#555;">' + p.obs + '</div></div>';
+  if (p.latc && p.lonc) {{
+    h += '<div class="row"><span class="label">Coords. Comercial</span><div style="color:#999;font-size:11px;">📍 ' + p.latc + ', ' + p.lonc + '</div></div>';
+  }}
+
+  h += '<hr><div style="text-align:right;font-size:10px;color:#aaa;">' + fuente + '</div>';
+  return h;
+}}
+
+function showPanel(p) {{
+  document.getElementById('infoTitle').textContent = '🏠 ' + p.id;
+  document.getElementById('infoBody').innerHTML = buildPopupContent(p);
+  document.getElementById('infoPanel').style.display = 'block';
+}}
+
+function closePanel() {{
+  document.getElementById('infoPanel').style.display = 'none';
+}}
+
+// ===== VIEWPORT LOADING =====
+function loadViewport() {{
+  if (isLoading) return;
+  var zoom = map.getZoom();
+  var zoomMsg = document.getElementById('zoomMsg');
+
+  if (zoom < MIN_ZOOM) {{
+    zoomMsg.style.opacity = '1';
+    zoomMsg.style.display = 'block';
+    document.getElementById('statsBar').textContent = 'Acerca el zoom para ver puntos (nivel ' + MIN_ZOOM + '+)';
+    return;
+  }}
+
+  zoomMsg.style.opacity = '0';
+  setTimeout(function() {{ zoomMsg.style.display = 'none'; }}, 300);
+
+  isLoading = true;
+  document.getElementById('statsBar').textContent = '⏳ Cargando puntos...';
+
+  var b = map.getBounds();
+  var url = API_BASE + '?south=' + b.getSouth() + '&north=' + b.getNorth() +
+    '&west=' + b.getWest() + '&east=' + b.getEast() + '&limit=10000';
+
+  fetch(url)
+    .then(function(r) {{ return r.json(); }})
+    .then(function(data) {{
+      var newPoints = data.points || [];
+
+      // Limpiar markers anteriores
+      if (clusterGroup) {{
+        map.removeLayer(clusterGroup);
+      }}
+      currentMarkers.forEach(function(m) {{ map.removeLayer(m); }});
+      currentMarkers = [];
+      markerIndex = {{}};
+
+      // Crear nuevo cluster group
+      clusterGroup = L.markerClusterGroup({{
+        maxClusterRadius: 80,
+        disableClusteringAtZoom: 16,
+        chunkedLoading: true,
+        chunkInterval: 100,
+        chunkDelay: 10,
+        spiderfyOnMaxZoom: false,
+        showCoverageOnHover: false,
+        animate: false,
+        removeOutsideVisibleBounds: true
+      }});
+
+      newPoints.forEach(function(p) {{
+        var m = L.circleMarker([p.lat, p.lon], {{
+          renderer: canvasRenderer,
+          radius: 6,
+          fillColor: p.c,
+          color: '#fff',
+          weight: 1.5,
+          opacity: 1,
+          fillOpacity: 0.85
+        }});
+        m._ptData = p;
+        m.on('click', function(e) {{
+          showPanel(this._ptData);
+          map.setView(e.latlng, Math.max(map.getZoom(), 16));
+        }});
+        clusterGroup.addLayer(m);
+        currentMarkers.push(m);
+        markerIndex[p.id] = m;
+      }});
+
+      if (USE_CLUSTERS) {{
+        map.addLayer(clusterGroup);
+      }} else {{
+        currentMarkers.forEach(function(m) {{ m.addTo(map); }});
+      }}
+
+      document.getElementById('statsBar').textContent =
+        newPoints.length.toLocaleString() + ' puntos en vista ✓';
+      isLoading = false;
+    }})
+    .catch(function(err) {{
+      console.error('Error cargando puntos:', err);
+      document.getElementById('statsBar').textContent = '❌ Error al cargar puntos';
+      isLoading = false;
+    }});
+}}
+
+// Cargar al mover/zoom con debounce
+map.on('moveend', function() {{
+  clearTimeout(loadTimeout);
+  loadTimeout = setTimeout(loadViewport, 400);
+}});
+
+// Carga inicial
+loadViewport();
+
+// ===== SEARCH =====
+var searchInput = document.getElementById('searchInput');
+var searchResults = document.getElementById('searchResults');
+var searchTimeout;
+
+function clearResults() {{
+  searchResults.innerHTML = '';
+  searchResults.style.display = 'none';
+}}
+
+function showResult(items) {{
+  searchResults.innerHTML = '';
+  if (items.length === 0) {{
+    searchResults.innerHTML = '<div class="result-item" style="color:#999;">Sin resultados</div>';
+  }} else {{
+    items.forEach(function(item) {{
+      var div = document.createElement('div');
+      div.className = 'result-item';
+      div.innerHTML = '<div class="result-type">' + item.type + '</div><div>' + item.label + '</div>';
+      div.onclick = item.action;
+      searchResults.appendChild(div);
+    }});
+  }}
+  searchResults.style.display = 'block';
+}}
+
+searchInput.addEventListener('input', function() {{
+  clearTimeout(searchTimeout);
+  var val = this.value.trim();
+  if (val.length < 2) {{ clearResults(); return; }}
+
+  searchTimeout = setTimeout(function() {{
+    var results = [];
+
+    // 1) Coordenadas
+    var coordMatch = val.match(/^\\s*(-?\\d+\\.\\d+)[\\s,]+(-?\\d+\\.\\d+)\\s*$/);
+    if (coordMatch) {{
+      var clat = parseFloat(coordMatch[1]);
+      var clon = parseFloat(coordMatch[2]);
+      results.push({{
+        type: '📍 Coordenadas',
+        label: clat.toFixed(6) + ', ' + clon.toFixed(6),
+        action: function() {{
+          map.setView([clat, clon], 18);
+          clearResults();
+        }}
+      }});
+    }}
+
+    // 2) Apartment ID (buscar en markers cargados)
+    var valUp = val.toUpperCase();
+    var idMatches = 0;
+    for (var id in markerIndex) {{
+      if (id.toUpperCase().indexOf(valUp) !== -1) {{
+        (function(foundId) {{
+          results.push({{
+            type: '🏠 Apartment ID',
+            label: foundId,
+            action: function() {{
+              var mk = markerIndex[foundId];
+              var ll = mk.getLatLng();
+              map.setView(ll, 18);
+              showPanel(mk._ptData);
+              mk.setStyle({{ radius: 14, weight: 3 }});
+              setTimeout(function() {{ mk.setStyle({{ radius: 6, weight: 1.5 }}); }}, 1500);
+              clearResults();
+            }}
+          }});
+        }})(id);
+        idMatches++;
+        if (idMatches >= 5) break;
+      }}
+    }}
+
+    // 3) Geocoder (Nominatim)
+    if (!coordMatch && val.length >= 3) {{
+      var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=es&q=' + encodeURIComponent(val);
+      fetch(url)
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          data.forEach(function(item) {{
+            results.push({{
+              type: '🗺️ Dirección',
+              label: item.display_name.substring(0, 80),
+              action: function() {{
+                map.setView([parseFloat(item.lat), parseFloat(item.lon)], 17);
+                clearResults();
+              }}
+            }});
+          }});
+          showResult(results);
+        }})
+        .catch(function() {{ showResult(results); }});
+      return;
+    }}
+
+    showResult(results);
+  }}, 400);
+}});
+
+document.addEventListener('click', function(e) {{
+  if (!document.getElementById('searchBox').contains(e.target)) clearResults();
+}});
+
+// ===== FULLSCREEN =====
+map.addControl(new (L.Control.extend({{
+  options: {{ position: 'topright' }},
+  onAdd: function() {{
+    var btn = L.DomUtil.create('div', 'leaflet-bar');
+    btn.innerHTML = '<a href="#" style="font-size:18px;line-height:26px;width:26px;height:26px;display:block;text-align:center;text-decoration:none;color:#333;" title="Pantalla completa">⛶</a>';
+    btn.onclick = function(e) {{
+      e.preventDefault(); e.stopPropagation();
+      var el = document.documentElement;
+      if (!document.fullscreenElement) el.requestFullscreen();
+      else document.exitFullscreen();
+    }};
+    return btn;
+  }}
+}}))());
+
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') {{ closePanel(); clearResults(); }}
+}});
+</script>
+</body></html>"""
+
+        import streamlit.components.v1 as components
+        components.html(viewport_map_html, height=620, scrolling=False)
+        return
 
     # ===== VERIFICACIÓN Y PROCESAMIENTO DE DATOS =====
 
@@ -1250,24 +1646,27 @@ def mapa_seccion():
 
     # ===== ESTADÍSTICAS =====
     if not datos_filtrados.empty:
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
 
         with col_s1:
             st.metric("Total Apartments", f"{len(datos_filtrados):,}")
 
         with col_s2:
-            if not comercial_filtradas.empty:
-                comerciales = comercial_filtradas['comercial'].nunique()
-                st.metric("Comerciales", comerciales)
+            if 'fuente' in datos_filtrados.columns:
+                duis = (datos_filtrados['fuente'] == 'datos_uis').sum()
+                st.metric("📋 datos_uis", f"{duis:,}")
 
         with col_s3:
-            # Contar serviciables
+            if 'fuente' in datos_filtrados.columns:
+                apts = (datos_filtrados['fuente'] == 'apartments').sum()
+                st.metric("🏗️ apartments", f"{apts:,}")
+
+        with col_s4:
             serviciables = sum(1 for apt_id in datos_filtrados['apartment_id']
                                if dicts.get('serviciable', {}).get(apt_id) == 'sí')
             st.metric("Serviciables", serviciables)
 
-        with col_s4:
-            # Contar incidencias
+        with col_s5:
             incidencias = sum(1 for apt_id in datos_filtrados['apartment_id']
                               if dicts.get('incidencia', {}).get(apt_id) == 'sí')
             st.metric("Incidencias", incidencias)
@@ -1295,8 +1694,12 @@ def mapa_seccion():
     # ===== MAPA LEAFLET CANVAS (alto rendimiento, 700K+ puntos) =====
     with st.spinner("🗺️ Preparando datos del mapa..."):
 
-        # Preparar datos como lista de dicts para JSON
-        import html as html_mod
+        # Helper para limpiar nan/None (definir fuera del bucle)
+        def clean(val):
+            if pd.isna(val):
+                return ''
+            v = str(val).strip()
+            return '' if v.lower() in ('nan', 'none', '') else v
 
         points_data = []
         # Pre-calcular offsets para coordenadas duplicadas
@@ -1331,11 +1734,6 @@ def mapa_seccion():
                 'purple': '#8e44ad', 'gray': '#95a5a6', 'blue': '#3498db'
             }.get(color, '#3498db')
 
-            # Helper para limpiar nan/None
-            def clean(val):
-                v = str(val) if pd.notna(val) else ''
-                return '' if v.lower() in ('nan', 'none', '') else v
-
             point = {
                 'id': apt_id, 'lat': lat, 'lon': lon, 'c': color_hex, 'e': estado,
                 'prov': clean(row.get('provincia', '')),
@@ -1346,7 +1744,7 @@ def mapa_seccion():
                 'fuente': clean(row.get('fuente', '')),
             }
 
-            # Campos extra de datos_uis
+            # Campos de datos_uis (parcela_catastral, cto_id, tipo_olt_rental)
             pc = clean(row.get('parcela_catastral', ''))
             if pc:
                 point['pc'] = pc
@@ -1357,7 +1755,7 @@ def mapa_seccion():
             if tor:
                 point['tor'] = tor
 
-            # Info comercial compacta
+            # Datos de comercial_rafa (via dicts)
             if apt_id in dicts.get('comercial', {}):
                 point['com'] = dicts['comercial'][apt_id]
             if apt_id in dicts.get('serviciable', {}):
@@ -1400,7 +1798,7 @@ def mapa_seccion():
   .info-panel {{
     position:absolute; top:10px; right:10px; z-index:1000;
     background:white; border-radius:8px; box-shadow:0 2px 12px rgba(0,0,0,.3);
-    max-width:320px; max-height:80vh; overflow-y:auto; display:none;
+    max-width:340px; max-height:80vh; overflow-y:auto; display:none;
     font-family:Arial,sans-serif; font-size:13px;
   }}
   .info-panel .header {{
@@ -1415,6 +1813,7 @@ def mapa_seccion():
   .info-panel .body .label {{ color:#7f8c8d; font-size:11px; text-transform:uppercase; }}
   .info-panel .body .value {{ font-weight:600; }}
   .info-panel .body hr {{ border:none; border-top:1px solid #ecf0f1; margin:10px 0; }}
+  .info-panel .body .section-title {{ color:#2c3e50; font-weight:700; font-size:12px; margin-bottom:4px; }}
   .legend {{
     position:absolute; bottom:30px; left:10px; z-index:1000;
     background:rgba(255,255,255,.92); border-radius:6px; padding:10px 14px;
@@ -1424,18 +1823,30 @@ def mapa_seccion():
   .legend .dot {{ width:12px; height:12px; border-radius:50%; margin-right:8px; flex-shrink:0; }}
   .search-box {{
     position:absolute; top:10px; left:50px; z-index:1000;
-    background:white; border-radius:6px; box-shadow:0 1px 6px rgba(0,0,0,.2);
-    padding:6px 10px; display:flex; align-items:center;
+    background:white; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.25);
+    padding:0; display:flex; flex-direction:column; width:280px;
+  }}
+  .search-box .input-row {{
+    display:flex; align-items:center; padding:8px 10px;
   }}
   .search-box input {{
-    border:none; outline:none; font-size:13px; width:200px; font-family:Arial;
+    border:none; outline:none; font-size:13px; width:100%; font-family:Arial;
+  }}
+  .search-box .results {{
+    max-height:200px; overflow-y:auto; border-top:1px solid #eee; display:none;
+  }}
+  .search-box .results .result-item {{
+    padding:8px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid #f5f5f5;
+  }}
+  .search-box .results .result-item:hover {{ background:#f0f7ff; }}
+  .search-box .results .result-item .result-type {{
+    font-size:10px; color:#999; text-transform:uppercase;
   }}
   .stats-bar {{
     position:absolute; bottom:30px; right:10px; z-index:1000;
     background:rgba(255,255,255,.92); border-radius:6px; padding:8px 12px;
     box-shadow:0 1px 6px rgba(0,0,0,.2); font:11px Arial,sans-serif; color:#555;
   }}
-  /* Cluster styling override for better contrast on satellite */
   .marker-cluster-small {{ background-color:rgba(52,152,219,.6); }}
   .marker-cluster-small div {{ background-color:rgba(52,152,219,.8); color:#fff; }}
   .marker-cluster-medium {{ background-color:rgba(243,156,18,.6); }}
@@ -1455,8 +1866,11 @@ def mapa_seccion():
 </div>
 
 <div class="search-box" id="searchBox">
-  <span style="margin-right:6px;">🔍</span>
-  <input type="text" id="searchInput" placeholder="Buscar Apartment ID..." />
+  <div class="input-row">
+    <span style="margin-right:6px;">🔍</span>
+    <input type="text" id="searchInput" placeholder="Buscar ID, dirección o coordenadas..." />
+  </div>
+  <div class="results" id="searchResults"></div>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -1500,47 +1914,52 @@ document.getElementById('statsBar').textContent = POINTS.length.toLocaleString()
 
 // ===== BUILD MARKERS =====
 var canvasRenderer = L.canvas({{ padding: 0.5 }});
-var markerIndex = {{}};  // apt_id -> marker for search
+var markerIndex = {{}};
 
 function buildPopupContent(p) {{
   var estado = p.e.replace(/_/g,' ');
   estado = estado.charAt(0).toUpperCase() + estado.slice(1);
   var fuente = p.fuente === 'datos_uis' ? '📋 datos_uis' : '🏗️ apartments';
 
-  var h = '<div class="row"><span class="label">Ubicación</span><div class="value">' +
-    p.prov + '</div><div>' + p.mun + ' - ' + p.pob + '</div><div>' + p.via + ' ' + p.num + '</div>' +
-    '<div style="color:#999;font-size:11px;margin-top:3px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
+  // === UBICACIÓN (siempre visible) ===
+  var h = '<div class="section-title">📍 Ubicación</div>' +
+    '<div class="row"><div class="value">' + p.prov + '</div></div>' +
+    '<div class="row"><div>' + p.mun + ' - ' + p.pob + '</div></div>' +
+    '<div class="row"><div>' + p.via + ' ' + p.num + '</div></div>' +
+    '<div class="row"><div style="color:#999;font-size:11px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
 
-  // Datos técnicos de datos_uis
-  if (p.pc || p.cto || p.tor) {{
-    h += '<hr><div class="row"><span class="label">Datos Técnicos</span></div>';
-    if (p.pc) h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + p.pc + '</div></div>';
-    if (p.cto) h += '<div class="row"><span class="label">CTO</span><div class="value">' + p.cto + '</div></div>';
-    if (p.tor) h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + p.tor + '</div></div>';
+  // === DATOS TÉCNICOS (datos_uis: parcela, CTO, tipo OLT) ===
+  h += '<hr><div class="section-title">📋 Datos Técnicos</div>';
+  h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + (p.pc || '—') + '</div></div>';
+  h += '<div class="row"><span class="label">CTO</span><div class="value">' + (p.cto || '—') + '</div></div>';
+  h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + (p.tor || '—') + '</div></div>';
+
+  // === ESTADO (siempre visible) ===
+  h += '<hr><div class="section-title">📊 Estado</div>';
+  h += '<div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
+
+  // === DATOS COMERCIALES (comercial_rafa) ===
+  h += '<hr><div class="section-title">👤 Datos Comerciales</div>';
+  h += '<div class="row"><span class="label">Comercial</span><div class="value">' + (p.com || '—') + '</div></div>';
+
+  var srv = p.srv ? p.srv.charAt(0).toUpperCase() + p.srv.slice(1) : '—';
+  h += '<div class="row"><span class="label">Serviciable</span><div class="value">' + srv + '</div></div>';
+  h += '<div class="row"><span class="label">Motivo Serviciable</span><div class="value">' + (p.msrv || '—') + '</div></div>';
+
+  var ctr = p.ctr ? p.ctr.charAt(0).toUpperCase() + p.ctr.slice(1) : '—';
+  h += '<div class="row"><span class="label">Contrato</span><div class="value">' + ctr + '</div></div>';
+
+  if (p.obs) {{
+    h += '<div class="row"><span class="label">Observaciones</span><div style="font-size:12px;color:#555;">' + p.obs + '</div></div>';
   }}
 
-  // Estado y datos comerciales
-  h += '<hr><div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
-
-  if (p.com) h += '<div class="row"><span class="label">Comercial</span><div class="value">' + p.com + '</div></div>';
-  if (p.srv) {{
-    var sv = p.srv.charAt(0).toUpperCase() + p.srv.slice(1);
-    h += '<div class="row"><span class="label">Serviciable</span><div class="value">' + sv + '</div></div>';
-  }}
-  if (p.msrv) h += '<div class="row"><span class="label">Motivo Serviciable</span><div class="value">' + p.msrv + '</div></div>';
-  if (p.ctr) {{
-    var ct = p.ctr.charAt(0).toUpperCase() + p.ctr.slice(1);
-    h += '<div class="row"><span class="label">Contrato</span><div class="value">' + ct + '</div></div>';
-  }}
-  if (p.obs) h += '<div class="row"><span class="label">Observaciones</span><div style="font-size:12px;color:#555;">' + p.obs + '</div></div>';
-
-  // Coordenadas comercial (si difieren)
+  // Coordenadas comercial
   if (p.latc && p.lonc) {{
-    h += '<hr><div class="row"><span class="label">Coords. Comercial</span>' +
+    h += '<div class="row"><span class="label">Coords. Comercial</span>' +
       '<div style="color:#999;font-size:11px;">📍 ' + p.latc + ', ' + p.lonc + '</div></div>';
   }}
 
-  // Fuente
+  // === FUENTE ===
   h += '<hr><div style="text-align:right;font-size:10px;color:#aaa;">' + fuente + '</div>';
 
   return h;
@@ -1556,7 +1975,7 @@ function closePanel() {{
   document.getElementById('infoPanel').style.display = 'none';
 }}
 
-// Create all markers
+// Create all markers (chunked)
 var allMarkers = [];
 var chunk = 5000;
 var idx = 0;
@@ -1584,7 +2003,6 @@ function addChunk() {{
   }}
   idx = end;
   if (idx < POINTS.length) {{
-    // Update progress
     document.getElementById('statsBar').textContent =
       'Cargando... ' + idx.toLocaleString() + ' / ' + POINTS.length.toLocaleString();
     requestAnimationFrame(addChunk);
@@ -1618,31 +2036,126 @@ function finishLoading() {{
     POINTS.length.toLocaleString() + ' puntos cargados ✓';
 }}
 
-// Start chunked loading
 addChunk();
 
-// ===== SEARCH =====
+// ===== SEARCH: Apartment ID + Geocoder (Nominatim) + Coordenadas =====
 var searchInput = document.getElementById('searchInput');
+var searchResults = document.getElementById('searchResults');
 var searchTimeout;
+
+function clearResults() {{
+  searchResults.innerHTML = '';
+  searchResults.style.display = 'none';
+}}
+
+function showResult(items) {{
+  searchResults.innerHTML = '';
+  if (items.length === 0) {{
+    searchResults.innerHTML = '<div class="result-item" style="color:#999;">Sin resultados</div>';
+  }} else {{
+    items.forEach(function(item) {{
+      var div = document.createElement('div');
+      div.className = 'result-item';
+      div.innerHTML = '<div class="result-type">' + item.type + '</div><div>' + item.label + '</div>';
+      div.onclick = item.action;
+      searchResults.appendChild(div);
+    }});
+  }}
+  searchResults.style.display = 'block';
+}}
+
 searchInput.addEventListener('input', function() {{
   clearTimeout(searchTimeout);
-  var val = this.value.trim().toUpperCase();
+  var val = this.value.trim();
+  if (val.length < 2) {{ clearResults(); return; }}
+
   searchTimeout = setTimeout(function() {{
-    if (val.length < 3) return;
-    // Find matching marker
+    var results = [];
+
+    // 1) Detectar coordenadas: "43.25, -5.92" o "43.25 -5.92"
+    var coordMatch = val.match(/^\\s*(-?\\d+\\.\\d+)[\\s,]+(-?\\d+\\.\\d+)\\s*$/);
+    if (coordMatch) {{
+      var clat = parseFloat(coordMatch[1]);
+      var clon = parseFloat(coordMatch[2]);
+      results.push({{
+        type: '📍 Coordenadas',
+        label: clat.toFixed(6) + ', ' + clon.toFixed(6),
+        action: function() {{
+          map.setView([clat, clon], 18);
+          clearResults();
+          // Buscar punto más cercano
+          var nearest = null, minDist = Infinity;
+          POINTS.forEach(function(p) {{
+            var d = Math.pow(p.lat - clat, 2) + Math.pow(p.lon - clon, 2);
+            if (d < minDist) {{ minDist = d; nearest = p; }}
+          }});
+          if (nearest && minDist < 0.0001) showPanel(nearest);
+        }}
+      }});
+    }}
+
+    // 2) Buscar por Apartment ID (local)
+    var valUp = val.toUpperCase();
+    var idMatches = 0;
     for (var id in markerIndex) {{
-      if (id.toUpperCase().indexOf(val) !== -1) {{
-        var mk = markerIndex[id];
-        var ll = mk.getLatLng();
-        map.setView(ll, 18);
-        showPanel(mk._ptData);
-        // Flash effect
-        mk.setStyle({{ radius: 14, weight: 3 }});
-        setTimeout(function() {{ mk.setStyle({{ radius: 6, weight: 1.5 }}); }}, 1500);
-        break;
+      if (id.toUpperCase().indexOf(valUp) !== -1) {{
+        (function(foundId) {{
+          results.push({{
+            type: '🏠 Apartment ID',
+            label: foundId,
+            action: function() {{
+              var mk = markerIndex[foundId];
+              var ll = mk.getLatLng();
+              map.setView(ll, 18);
+              showPanel(mk._ptData);
+              mk.setStyle({{ radius: 14, weight: 3 }});
+              setTimeout(function() {{ mk.setStyle({{ radius: 6, weight: 1.5 }}); }}, 1500);
+              clearResults();
+            }}
+          }});
+        }})(id);
+        idMatches++;
+        if (idMatches >= 5) break;
       }}
     }}
-  }}, 300);
+
+    // 3) Buscar por dirección (Nominatim / OpenStreetMap) si no es coordenadas y hay >2 chars
+    if (!coordMatch && val.length >= 3) {{
+      var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=es&q=' + encodeURIComponent(val);
+      fetch(url)
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          data.forEach(function(item) {{
+            results.push({{
+              type: '🗺️ Dirección',
+              label: item.display_name.substring(0, 80),
+              action: function() {{
+                map.setView([parseFloat(item.lat), parseFloat(item.lon)], 17);
+                clearResults();
+                // Buscar punto cercano
+                var flat = parseFloat(item.lat), flon = parseFloat(item.lon);
+                var nearest = null, minDist = Infinity;
+                POINTS.forEach(function(p) {{
+                  var d = Math.pow(p.lat - flat, 2) + Math.pow(p.lon - flon, 2);
+                  if (d < minDist) {{ minDist = d; nearest = p; }}
+                }});
+                if (nearest && minDist < 0.0001) showPanel(nearest);
+              }}
+            }});
+          }});
+          showResult(results);
+        }})
+        .catch(function() {{ showResult(results); }});
+      return; // Don't show results yet, wait for fetch
+    }}
+
+    showResult(results);
+  }}, 400);
+}});
+
+// Close results on click outside
+document.addEventListener('click', function(e) {{
+  if (!document.getElementById('searchBox').contains(e.target)) clearResults();
 }});
 
 // ===== FULLSCREEN =====
@@ -1663,7 +2176,7 @@ map.addControl(new (L.Control.extend({{
 
 // Close panel on Escape
 document.addEventListener('keydown', function(e) {{
-  if (e.key === 'Escape') closePanel();
+  if (e.key === 'Escape') {{ closePanel(); clearResults(); }}
 }});
 </script>
 </body></html>"""
