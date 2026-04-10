@@ -2,6 +2,8 @@ from modules.notificaciones import correo_usuario, correo_nuevas_zonas_comercial
     correo_envio_presupuesto_manual, correo_nueva_version, correo_asignacion_puntos_existentes, \
     correo_viabilidad_comercial, notificar_asignacion_ticket, notificar_actualizacion_ticket, correo_respuesta_comercial,\
     notificar_resolucion_ticket, notificar_reasignacion_ticket
+from modules.inventario import obtener_personal_activo, agregar_persona, cargar_dispositivos, guardar_dispositivo, actualizar_dispositivo, eliminar_dispositivo, asignar_dispositivo, devolver_dispositivo, obtener_asignaciones_activas \
+, obtener_historial_dispositivo, get_db_connection
 from datetime import datetime as dt  # Para evitar conflicto con datetime
 from streamlit_option_menu import option_menu
 from streamlit_cookies_controller import CookieController
@@ -36,20 +38,6 @@ def obtener_conexion():
     except Exception as e:
         print(f"Error al conectar con la base de datos: {e}")
         return None
-
-#def obtener_conexion():
-#    """Retorna una nueva conexión a la base de datos SQLite local."""
-#    try:
-#        # Ruta del archivo dentro del contenedor (puedes cambiarla)
-#        db_path = "/data/usuarios.db"  # o usa variable de entorno
-#        # Verifica si el archivo existe
-#        if not os.path.exists(db_path):
-#            raise FileNotFoundError(f"No se encuentra la base de datos en {db_path}")
-#        conn = sqlite3.connect(db_path)
-#        return conn
-#    except (sqlite3.Error, FileNotFoundError) as e:
-#        print(f"Error al conectar con la base de datos: {e}")
-#        return None
 
 def log_trazabilidad(usuario, accion, detalles):
     """Inserta un registro en la tabla de trazabilidad."""
@@ -6297,6 +6285,252 @@ def crear_ticket_ejemplo():
     except Exception as e:
         st.toast(f"⚠️ Error al crear ticket de ejemplo: {str(e)[:100]}")
 
+#--------------------------------------------------------------------------------------------
+def inventario_content():
+    """Contenido completo del módulo de inventario (sin sidebar ni set_page_config)."""
+    # Footer (opcional, puede estar ya en admin_dashboard)
+    st.markdown(
+        """
+        <style>
+        .footer {
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            background-color: #F7FBF9;
+            color: black;
+            text-align: center;
+            padding: 8px 0;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+            z-index: 999;
+        }
+        </style>
+        <div class="footer">
+            <p>© 2025 Verde tu operador · Desarrollado para uso interno</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # En lugar del menú lateral, usamos un selector en el área principal
+    st.title("📦 Inventario de oficina")
+    subopcion = st.radio(
+        "Selecciona una sección:",
+        ["Inventario", "Asignaciones activas", "Historial", "Personal", "Informes"],
+        horizontal=True
+    )
+
+    # ==================== SECCIÓN: GESTIÓN DE PERSONAL ====================
+    if subopcion == "Personal":
+        st.header("👥 Personal (personas asignables)")
+        with st.expander("➕ Agregar nueva persona", expanded=False):
+            with st.form("nueva_persona"):
+                nombre = st.text_input("Nombre completo *")
+                email = st.text_input("Email")
+                departamento = st.text_input("Departamento")
+                submitted = st.form_submit_button("Guardar")
+                if submitted and nombre:
+                    if agregar_persona(nombre, email, departamento, st.session_state["username"]):
+                        st.success(f"✅ {nombre} agregado al catálogo")
+                        st.rerun()
+                elif submitted:
+                    st.error("El nombre es obligatorio")
+
+        df_personal = obtener_personal_activo()
+        if df_personal.empty:
+            st.info("No hay personal registrado aún.")
+        else:
+            st.dataframe(df_personal, use_container_width=True)
+
+    # ==================== SECCIÓN: INVENTARIO (dispositivos) ====================
+    elif subopcion == "Inventario":
+        st.header("📋 Dispositivos")
+        # Formulario nuevo dispositivo
+        with st.expander("➕ Agregar nuevo dispositivo", expanded=False):
+            with st.form("nuevo_dispositivo"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    tipo = st.selectbox("Tipo", ["PC", "Portátil", "Monitor", "Ratón", "Teclado", "Otro"])
+                    marca = st.text_input("Marca")
+                with col2:
+                    modelo = st.text_input("Identificador")
+                    numero_serie = st.text_input("Modelo *")
+                with col3:
+                    estado = st.selectbox("Estado", ["Operativo", "Reparación", "Baja", "Prestado"])
+                    ubicacion = st.text_input("Ubicación")
+                comentarios = st.text_area("Comentarios")
+                imagen = st.file_uploader("Foto", type=["jpg", "jpeg", "png"])
+                if st.form_submit_button("Guardar dispositivo"):
+                    if not numero_serie:
+                        st.error("El modelo es obligatorio")
+                    else:
+                        data = {"tipo": tipo, "marca": marca, "modelo": modelo, "numero_serie": numero_serie,
+                                "estado": estado, "ubicacion": ubicacion, "comentarios": comentarios}
+                        if guardar_dispositivo(data, imagen, st.session_state["username"]):
+                            st.success("✅ Dispositivo guardado")
+                            st.rerun()
+
+        # Filtros y listado
+        tipos = ["Todos"] + sorted(
+            pd.read_sql("SELECT DISTINCT tipo FROM dispositivos", get_db_connection())["tipo"].tolist())
+        estados = ["Todos", "Operativo", "Reparación", "Baja", "Prestado"]
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            filtro_tipo = st.selectbox("Filtrar por tipo", tipos)
+        with col_f2:
+            filtro_estado = st.selectbox("Filtrar por estado", estados)
+
+        filtros = {}
+        if filtro_tipo != "Todos":
+            filtros["tipo"] = filtro_tipo
+        if filtro_estado != "Todos":
+            filtros["estado"] = filtro_estado
+
+        df = cargar_dispositivos(filtros)
+        if df.empty:
+            st.info("No hay dispositivos con esos filtros.")
+        else:
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Total", len(df))
+            col_m2.metric("Operativos", len(df[df["estado"] == "Operativo"]))
+            col_m3.metric("Reparación", len(df[df["estado"] == "Reparación"]))
+            col_m4.metric("Prestados", len(df[df["estado"] == "Prestado"]))
+
+            for _, row in df.iterrows():
+                with st.expander(f"{row['tipo']} - {row['marca']} {row['modelo']} (Modelo: {row['numero_serie']})"):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"**Estado:** {row['estado']}  |  **Ubicación:** {row['ubicacion'] or '—'}")
+                        st.markdown(f"**Comentarios:** {row['comentarios'] or '—'}")
+                        if row['imagen_url']:
+                            st.image(row['imagen_url'], width=200)
+                    with col2:
+                        if st.button(f"✏️ Editar", key=f"edit_{row['id']}"):
+                            st.session_state["edit_id"] = row['id']
+                            st.session_state["edit_data"] = row.to_dict()
+                        if st.button(f"🗑️ Eliminar", key=f"del_{row['id']}"):
+                            if eliminar_dispositivo(row['id'], st.session_state["username"]):
+                                st.success("Eliminado")
+                                st.rerun()
+                        if row['estado'] != "Prestado":
+                            if st.button(f"🔁 Asignar", key=f"assign_{row['id']}"):
+                                st.session_state["asignar_id"] = row['id']
+
+        # Formulario de edición
+        if "edit_id" in st.session_state:
+            st.subheader("✏️ Editar dispositivo")
+            edit_data = st.session_state["edit_data"]
+            with st.form("editar_form"):
+                tipo_e = st.selectbox("Tipo", ["PC", "Portátil", "Monitor", "Ratón", "Teclado", "Otro"],
+                                      index=["PC", "Portátil", "Monitor", "Ratón", "Teclado", "Otro"].index(
+                                          edit_data["tipo"]))
+                marca_e = st.text_input("Marca", value=edit_data["marca"] or "")
+                modelo_e = st.text_input("Identificador", value=edit_data["modelo"] or "")
+                serie_e = st.text_input("Modelo", value=edit_data["numero_serie"])
+                estado_e = st.selectbox("Estado", ["Operativo", "Reparación", "Baja", "Prestado"],
+                                        index=["Operativo", "Reparación", "Baja", "Prestado"].index(
+                                            edit_data["estado"]))
+                ubicacion_e = st.text_input("Ubicación", value=edit_data["ubicacion"] or "")
+                comentarios_e = st.text_area("Comentarios", value=edit_data["comentarios"] or "")
+                imagen_e = st.file_uploader("Nueva foto (opcional)", type=["jpg", "jpeg", "png"])
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.form_submit_button("💾 Guardar cambios"):
+                        data = {"tipo": tipo_e, "marca": marca_e, "modelo": modelo_e, "numero_serie": serie_e,
+                                "estado": estado_e, "ubicacion": ubicacion_e, "comentarios": comentarios_e}
+                        if actualizar_dispositivo(edit_data["id"], data, imagen_e, st.session_state["username"]):
+                            st.success("Actualizado")
+                            del st.session_state["edit_id"]
+                            st.rerun()
+                with col_btn2:
+                    if st.form_submit_button("❌ Cancelar"):
+                        del st.session_state["edit_id"]
+                        st.rerun()
+
+        # Formulario de asignación
+        if "asignar_id" in st.session_state:
+            disp_id = st.session_state["asignar_id"]
+            disp_info = df[df["id"] == disp_id].iloc[0]
+            st.subheader(f"Asignar {disp_info['tipo']} - {disp_info['numero_serie']}")
+            df_personal = obtener_personal_activo()
+            if df_personal.empty:
+                st.warning("No hay personal registrado. Ve a la sección 'Personal' para agregar.")
+            else:
+                with st.form("asignar_form"):
+                    persona_opts = {f"{row['nombre_completo']} ({row['departamento'] or 'Sin dep.'})": row['id'] for
+                                    _, row in df_personal.iterrows()}
+                    seleccion = st.selectbox("Persona a quien asignar", list(persona_opts.keys()))
+                    motivo = st.text_area("Motivo de la asignación")
+                    col_as1, col_as2 = st.columns(2)
+                    with col_as1:
+                        if st.form_submit_button("✅ Confirmar asignación"):
+                            persona_id = persona_opts[seleccion]
+                            if asignar_dispositivo(disp_id, persona_id, motivo, st.session_state["username"]):
+                                st.success("Dispositivo asignado")
+                                del st.session_state["asignar_id"]
+                                st.rerun()
+                    with col_as2:
+                        if st.form_submit_button("Cancelar"):
+                            del st.session_state["asignar_id"]
+                            st.rerun()
+
+    # ==================== SECCIÓN: ASIGNACIONES ACTIVAS ====================
+    elif subopcion == "Asignaciones activas":
+        st.header("🔁 Dispositivos prestados actualmente")
+        df_asign = obtener_asignaciones_activas()
+        if df_asign.empty:
+            st.info("No hay dispositivos prestados.")
+        else:
+            for _, row in df_asign.iterrows():
+                with st.expander(f"{row['tipo']} {row['marca']} {row['modelo']} → {row['asignado_a']}"):
+                    st.write(f"**Modelo:** {row['numero_serie']}")
+                    st.write(f"**Fecha asignación:** {row['fecha_asignacion']}")
+                    st.write(f"**Motivo:** {row['motivo']}")
+                    if st.button("🔁 Registrar devolución", key=f"devolver_{row['id']}"):
+                        if devolver_dispositivo(row['id'], row['dispositivo_id'], st.session_state["username"]):
+                            st.success("Devuelto correctamente")
+                            st.rerun()
+
+    # ==================== SECCIÓN: HISTORIAL POR DISPOSITIVO ====================
+    elif subopcion == "Historial":
+        st.header("📜 Historial de movimientos por dispositivo")
+        conn = get_db_connection()
+        disp_list = pd.read_sql("SELECT id, tipo, marca, modelo, numero_serie FROM dispositivos ORDER BY id", conn)
+        conn.close()
+        if disp_list.empty:
+            st.info("No hay dispositivos registrados.")
+        else:
+            disp_opts = {
+                f"{row['id']} - {row['tipo']} {row['marca']} {row['modelo']} ({row['numero_serie']})": row['id'] for
+                _, row in disp_list.iterrows()}
+            seleccion = st.selectbox("Selecciona un dispositivo", list(disp_opts.keys()))
+            disp_id = disp_opts[seleccion]
+            historial = obtener_historial_dispositivo(disp_id)
+            if historial.empty:
+                st.info("No hay asignaciones previas para este dispositivo.")
+            else:
+                st.dataframe(historial, use_container_width=True)
+
+    # ==================== SECCIÓN: INFORMES ====================
+    elif subopcion == "Informes":
+        st.header("📊 Informes y estadísticas")
+        df_total = cargar_dispositivos()
+        if not df_total.empty:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Por estado")
+                st.bar_chart(df_total["estado"].value_counts())
+            with col2:
+                st.subheader("Por tipo")
+                st.bar_chart(df_total["tipo"].value_counts())
+            csv = df_total.to_csv(index=False)
+            st.download_button("📥 Exportar inventario a CSV", data=csv,
+                               file_name=f"inventario_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        else:
+            st.info("No hay datos para mostrar")
+
+#--------------------------------------------------------------------------------------------
 # Función principal de la app (Dashboard de administración)
 def admin_dashboard():
     """Panel del administrador."""
@@ -6365,13 +6599,13 @@ def admin_dashboard():
         opcion = option_menu(
             menu_title=None,
             options=[
-                "Home", "Ver Datos", "Ofertas Comerciales", "Viabilidades",
+                "Home", "Inventario", "Ver Datos", "Ofertas Comerciales", "Viabilidades",
                 "Mapa UUIIs", "Cargar Nuevos Datos", "Generar Informe", "CDRs",
                 "Trazabilidad y logs", "Gestionar Usuarios", "Anuncios",
                 "Control de versiones", "Sistema de Ticketing"  # Nuevas opciones
             ],
             icons=[
-                "house", "graph-up", "bar-chart", "check-circle", "globe", "upload",
+                "house", "archive","graph-up", "bar-chart", "check-circle", "globe", "upload",
                 "file-earmark-text", "journal-text", "journal-text", "people", "megaphone",
                 "arrow-clockwise", "ticket"  # Nuevos iconos
             ],
@@ -6434,6 +6668,8 @@ def admin_dashboard():
     # AÑADE ESTAS DOS NUEVAS OPCIONES:
     elif opcion == "Sistema de Ticketing":
         admin_ticketing_panel()
+    elif opcion == "Inventario":
+        inventario_content()
     elif opcion == "Ver Datos":
 
         sub_seccion = option_menu(
