@@ -2313,6 +2313,29 @@ def viabilidades_seccion():
         log_trazabilidad("Administrador", "Visualización de Viabilidades",
                          "El administrador visualizó la sección de viabilidades.")
 
+        # ==============================
+        # Sincronización automática con Google Sheets
+        # ==============================
+        SYNC_INTERVAL_SECONDS = 30 * 60  # 30 minutos (cámbialo a 60, 300, etc.)
+
+        now = datetime.now()
+        last_sync = st.session_state.get("last_google_sync", None)
+
+        if last_sync is None or (now - last_sync).total_seconds() > SYNC_INTERVAL_SECONDS:
+            with st.spinner("🔄 Sincronizando automáticamente con Google Sheets..."):
+                try:
+                    actualizar_google_sheet_desde_db(
+                        sheet_id="14nC88hQoCdh6B6pTq7Ktu2k8HWOyS2BaTqcUOIhXuZY",
+                        sheet_name="viabilidades_verde"
+                    )
+                    st.session_state["last_google_sync"] = now
+                    st.toast("✅ Sincronización automática completada")
+                except Exception as e:
+                    st.toast(f"❌ Error en sincronización automática: {e}")
+        else:
+            minutes_ago = int((now - last_sync).total_seconds() // 60)
+            st.caption(f"🕒 Última sincronización con Google Sheets hace {minutes_ago} minutos")
+
         # Inicializamos el estado si no existe
         if "map_center" not in st.session_state:
             st.session_state["map_center"] = [43.463444, -3.790476]
@@ -2325,7 +2348,8 @@ def viabilidades_seccion():
         with st.spinner("⏳ Cargando los datos de viabilidades..."):
             try:
                 conn = obtener_conexion()
-                tables = pd.read_sql("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public';", conn)
+                tables = pd.read_sql(
+                    "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public';", conn)
                 if 'viabilidades' not in tables['name'].values:
                     st.toast("❌ La tabla 'viabilidades' no se encuentra en la base de datos.")
                     conn.close()
@@ -2351,12 +2375,11 @@ def viabilidades_seccion():
         # Agregamos columna de duplicados
         viabilidades_df.loc[:, 'is_duplicate'] = viabilidades_df['apartment_id'].duplicated(keep=False)
 
-        # ✅ CORRECCIÓN 2: Agregar columna que indica si tiene presupuesto asociado
+        # Columna que indica si tiene presupuesto asociado
         try:
             conn = obtener_conexion()
             presupuestos_df = pd.read_sql("SELECT DISTINCT ticket FROM presupuestos_viabilidades", conn)
             conn.close()
-            # Usar .loc para una asignación segura
             viabilidades_df.loc[:, 'tiene_presupuesto'] = viabilidades_df['ticket'].isin(presupuestos_df['ticket'])
         except Exception as e:
             viabilidades_df.loc[:, 'tiene_presupuesto'] = False
@@ -2438,9 +2461,7 @@ def viabilidades_seccion():
                 theme='alpine-dark'
             )
 
-            # ==============================
-            # 🔍 Manejo robusto de selección
-            # ==============================
+            # Manejo robusto de selección
             selected_rows = grid_response.get("selected_data", [])
             if isinstance(selected_rows, pd.DataFrame):
                 selected_rows = selected_rows.to_dict(orient="records")
@@ -2464,9 +2485,7 @@ def viabilidades_seccion():
                     st.session_state["reload_form"] = True
                     st.rerun()
 
-            # ==============================
             # Mostrar detalles del ticket
-            # ==============================
             selected_viabilidad = None
             if st.session_state.get("selected_ticket"):
                 ticket_str = str(st.session_state["selected_ticket"]).strip()
@@ -2475,9 +2494,7 @@ def viabilidades_seccion():
                 if not filtered.empty:
                     selected_viabilidad = filtered.iloc[0].copy()
 
-            # ==============================
             # Exportar a Excel
-            # ==============================
             df_export = viabilidades_df.copy()
 
             def expand_apartments(df):
@@ -2497,29 +2514,16 @@ def viabilidades_seccion():
                 df_export.to_excel(writer, index=False, sheet_name="Viabilidades")
             output.seek(0)
 
-            col_b1, _, col_b2 = st.columns([1, 2.3, 1])
-
-            with col_b1:
-                if st.button("🔄 Actualizar"):
-                    with st.spinner("🔄 Actualizando hoja de Google Sheets..."):
-                        actualizar_google_sheet_desde_db(
-                            sheet_id="14nC88hQoCdh6B6pTq7Ktu2k8HWOyS2BaTqcUOIhXuZY",
-                            sheet_name="viabilidades_verde"
-                        )
-
-            with col_b2:
-                st.download_button(
-                    label="📥 Descargar Excel",
-                    data=output,
-                    file_name="viabilidades_export.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            # Botón de descarga (el de actualizar se ha eliminado)
+            st.download_button(
+                label="📥 Descargar Excel",
+                data=output,
+                file_name="viabilidades_export.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
         with col1:
-
-            # ==============================
-            # Función para dibujar el mapa
-            # ==============================
+            # Función para dibujar el mapa (sin cambios)
             def draw_map(df, center, zoom, selected_ticket=None):
                 m = folium.Map(location=center, zoom_start=zoom,
                                tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
@@ -2541,7 +2545,6 @@ def viabilidades_seccion():
                     apartment_id = str(row.get('apartment_id', '')).strip()
                     tiene_presupuesto = row.get('tiene_presupuesto', False)
 
-                    # Color por estado
                     if tiene_presupuesto:
                         marker_color = 'orange'
                     elif row.get('estado') == "No interesado":
@@ -2555,7 +2558,6 @@ def viabilidades_seccion():
                     else:
                         marker_color = 'blue'
 
-                    # Si es el ticket seleccionado, resaltamos en dorado
                     if selected_ticket and ticket == str(selected_ticket).strip():
                         folium.Marker(
                             location=[lat, lon],
@@ -2572,9 +2574,7 @@ def viabilidades_seccion():
 
                 return m
 
-            # ==============================
             # Determinar centro y zoom
-            # ==============================
             if st.session_state.get("selected_ticket"):
                 ticket_str = str(st.session_state["selected_ticket"]).strip()
                 df_sel = viabilidades_df.loc[viabilidades_df["ticket"].astype(str).str.strip() == ticket_str]
@@ -2588,9 +2588,7 @@ def viabilidades_seccion():
                 center = st.session_state.get("map_center", [40.0, -3.7])
                 zoom = st.session_state.get("map_zoom", 6)
 
-            # ==============================
             # Dibujar mapa
-            # ==============================
             m_to_show = draw_map(
                 viabilidades_df,
                 center=center,
@@ -2598,9 +2596,7 @@ def viabilidades_seccion():
                 selected_ticket=st.session_state.get("selected_ticket")
             )
 
-            # ==============================
             # Leyenda
-            # ==============================
             legend = """
             {% macro html(this, kwargs) %}
             <div style="
@@ -2631,9 +2627,7 @@ def viabilidades_seccion():
             m_to_show.get_root().add_child(macro)
             Geocoder().add_to(m_to_show)
 
-            # ==============================
             # Mostrar mapa y detectar clic
-            # ==============================
             map_output = st_folium(
                 m_to_show,
                 height=500,
@@ -2642,9 +2636,7 @@ def viabilidades_seccion():
                 returned_objects=["last_object_clicked"]
             )
 
-            # ==============================
             # Detectar clic del mapa
-            # ==============================
             if map_output and map_output.get("last_object_clicked"):
                 clicked_lat = map_output["last_object_clicked"]["lat"]
                 clicked_lng = map_output["last_object_clicked"]["lng"]
@@ -2665,13 +2657,9 @@ def viabilidades_seccion():
                         st.session_state["selection_source"] = "map"
 
                         st.toast(f"📍 Ticket {clicked_ticket} seleccionado desde el mapa")
-
-                        # Forzar recarga
                         st.rerun()
 
-            # ==============================
-            # Si venimos del mapa, limpiamos selección de tabla
-            # ==============================
+            # Limpiar selección de tabla si venimos del mapa
             if st.session_state.get("selection_source") == "map":
                 st.session_state["selection_source"] = None
                 st.session_state["last_table_selection"] = None
@@ -2681,7 +2669,8 @@ def viabilidades_seccion():
             if selected_viabilidad is not None:
                 mostrar_formulario(selected_viabilidad)
             else:
-                st.warning(f"⚠️ No se encontró la viabilidad con ticket {st.session_state['selected_ticket']}. Puede haber sido borrada.")
+                st.warning(
+                    f"⚠️ No se encontró la viabilidad con ticket {st.session_state['selected_ticket']}. Puede haber sido borrada.")
                 st.session_state["selected_ticket"] = None
 
             if st.session_state.get("selected_ticket"):
@@ -2702,7 +2691,6 @@ def viabilidades_seccion():
                         value="Adjunto presupuesto en formato PDF para su revisión."
                     )
 
-                    # Define los destinatarios disponibles
                     destinatarios_posibles = {
                         "Rafa Sanz": "rafasanz9@gmail.com",
                         "Juan AsturPhone": "admin@asturphone.com",
@@ -2715,16 +2703,13 @@ def viabilidades_seccion():
                     if seleccionados and st.button("🚀 Enviar presupuesto en PDF por correo"):
                         try:
                             nombre_archivo = archivo.name
-                            archivo_bytes = archivo.getvalue()  # Leer bytes del PDF
+                            archivo_bytes = archivo.getvalue()
 
-                            # 📂 Subir a la carpeta "PRESUPUESTOS" en Cloudinary
-
-                            # 🔹 Subir PDF a Cloudinary (como tipo raw)
                             st.toast("📤 Subiendo PDF a Cloudinary...")
                             cloudinary_url = upload_file_to_cloudinary(
-                                archivo_bytes,  # Pasamos los bytes directamente
-                                filename=nombre_archivo,  # Nombre del archivo
-                                folder=st.session_state["selected_ticket"],  # Organiza por ticket dentro del bucket
+                                archivo_bytes,
+                                filename=nombre_archivo,
+                                folder=st.session_state["selected_ticket"],
                                 tipo="presupuesto"
                             )
 
@@ -2732,7 +2717,6 @@ def viabilidades_seccion():
                                 st.toast("❌ Error al subir el archivo a Cloudinary. No se puede continuar.")
                                 st.stop()
 
-                            # 🔹 Enviar correo a los seleccionados
                             for nombre in seleccionados:
                                 correo = destinatarios_posibles[nombre]
 
@@ -2744,7 +2728,6 @@ def viabilidades_seccion():
                                     nombre_archivo=nombre_archivo
                                 )
 
-                                # 🔹 Registrar el envío en la base de datos con URL
                                 try:
                                     conn = obtener_conexion()
                                     cursor = conn.cursor()
@@ -2764,10 +2747,8 @@ def viabilidades_seccion():
                                     conn.close()
                                 except Exception as db_error:
                                     st.toast(
-                                        f"⚠️ Correo enviado a {correo}, pero no se pudo registrar en la BBDD: {db_error}"
-                                    )
+                                        f"⚠️ Correo enviado a {correo}, pero no se pudo registrar en la BBDD: {db_error}")
 
-                            # 🔹 Marcar en la tabla viabilidades que se ha enviado
                             try:
                                 conn = obtener_conexion()
                                 cursor = conn.cursor()
@@ -2781,8 +2762,7 @@ def viabilidades_seccion():
                                 st.toast("🗂️ Se ha registrado en la BBDD que el presupuesto en PDF ha sido enviado.")
                             except Exception as db_error:
                                 st.toast(
-                                    f"⚠️ El correo fue enviado, pero hubo un error al actualizar la BBDD: {db_error}"
-                                )
+                                    f"⚠️ El correo fue enviado, pero hubo un error al actualizar la BBDD: {db_error}")
 
                             st.toast("✅ Presupuesto en PDF enviado y guardado correctamente en Cloudinary.")
                         except Exception as e:
@@ -2802,7 +2782,8 @@ def viabilidades_seccion():
                 if df_historial.empty:
                     st.info("No se han registrado envíos de presupuesto aún.")
                 else:
-                    df_historial["fecha_envio"] = pd.to_datetime(df_historial["fecha_envio"]).dt.strftime("%d/%m/%Y %H:%M")
+                    df_historial["fecha_envio"] = pd.to_datetime(df_historial["fecha_envio"]).dt.strftime(
+                        "%d/%m/%Y %H:%M")
                     st.dataframe(df_historial, width='stretch')
 
             except Exception as e:
