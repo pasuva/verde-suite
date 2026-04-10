@@ -8,7 +8,7 @@
     "ENV CHROMIUM_PATH=/usr/bin/chromium",
     "COPY requirements.txt .",
     "RUN pip install --no-cache-dir -r requirements.txt",
-    "RUN echo bust-cache-20260411",
+    "RUN echo bust-cache-20260411b",
     "COPY . .",
     "COPY nginx.conf /etc/nginx/sites-enabled/default",
     "COPY start.sh /app/start.sh",
