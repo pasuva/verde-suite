@@ -7704,7 +7704,7 @@ def admin_dashboard():
         elif sub_seccion == "Agregar usuarios":
             st.info("ℹ️ Desde esta sección puedes agregar nuevos usuarios al sistema.")
             nombre = st.text_input("Nombre del Usuario")
-            rol = st.selectbox("Rol", ["admin", "comercial", "comercial_jefe", "comercial_rafa", "comercial_vip","demo", "marketing","viabilidad","auditor"])
+            rol = st.selectbox("Rol", ["admin", "comercial", "comercial_jefe", "comercial_rafa", "comercial_vip","demo", "marketing","viabilidad","auditor","rol_inventario"])
             email = st.text_input("Email del Usuario")
             password = st.text_input("Contraseña", type="password")
 
@@ -7730,9 +7730,9 @@ def admin_dashboard():
                 if usuario:
                     nuevo_nombre = st.text_input("Nuevo Nombre", value=usuario[0])
                     nuevo_rol = st.selectbox("Nuevo Rol",
-                                             ["admin", "comercial", "comercial_jefe", "comercial_rafa","comercial_vip","demo", "marketing","viabilidad","auditor"],
+                                             ["admin", "comercial", "comercial_jefe", "comercial_rafa","comercial_vip","demo", "marketing","viabilidad","auditor","rol_inventario"],
                                              index=["admin", "comercial", "comercial_jefe",
-                                                    "comercial_rafa","comercial_vip","demo", "marketing","viabilidad","auditor"].index(usuario[1]))
+                                                    "comercial_rafa","comercial_vip","demo", "marketing","viabilidad","auditor","rol_inventario"].index(usuario[1]))
                     nuevo_email = st.text_input("Nuevo Email", value=usuario[2])
                     nueva_contraseña = st.text_input("Nueva Contraseña", type="password")
 
