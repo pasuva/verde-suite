@@ -46,15 +46,17 @@ def get_points(
 
         # datos_uis tiene prioridad — se cargan primero
         cur.execute("""
-            SELECT apartment_id, latitud AS lat, longitud AS lon,
-                   provincia, municipio, poblacion, vial, numero,
-                   parcela_catastral, cto_id, tipo_olt_rental,
+            SELECT d.apartment_id, d.latitud AS lat, d.longitud AS lon,
+                   d.provincia, d.municipio, d.poblacion, d.vial, d.numero,
+                   d.parcela_catastral, d.cto_id, d.tipo_olt_rental,
+                   a.apartment_sales_area,
                    'datos_uis' AS fuente
-            FROM datos_uis
-            WHERE latitud BETWEEN %s AND %s
-            AND longitud BETWEEN %s AND %s
-            AND latitud IS NOT NULL AND longitud IS NOT NULL
-            AND latitud != 0 AND longitud != 0
+            FROM datos_uis d
+            LEFT JOIN apartments a ON a.apartment_id::text = LTRIM(d.apartment_id, 'P0')
+            WHERE d.latitud BETWEEN %s AND %s
+            AND d.longitud BETWEEN %s AND %s
+            AND d.latitud IS NOT NULL AND d.longitud IS NOT NULL
+            AND d.latitud != 0 AND d.longitud != 0
         """, (south, north, west, east))
 
         cols = [desc[0] for desc in cur.description]
@@ -74,7 +76,7 @@ def get_points(
         cur.execute("""
             SELECT apartment_id AS apt_num, lat, lng AS lon,
                    provincia, municipio, poblacion, vial, numero,
-                   parcela_catastral
+                   parcela_catastral, apartment_sales_area
             FROM apartments
             WHERE lat BETWEEN %s AND %s
             AND lng BETWEEN %s AND %s
@@ -101,6 +103,7 @@ def get_points(
                 'vial': r['vial'],
                 'numero': r['numero'],
                 'parcela_catastral': r['parcela_catastral'],
+                'apartment_sales_area': r.get('apartment_sales_area'),
                 'cto_id': None,
                 'tipo_olt_rental': None,
                 'fuente': 'apartments',
@@ -131,44 +134,35 @@ def get_points(
             s = str(v).strip()
             return None if s.lower() in ('nan', 'none', '') else s
 
-        def color_estado(apt_id, serv_uis, com_data):
-            inc = clean(com_data.get('incidencia', '')) if com_data else None
-            serv_of = clean(com_data.get('serviciable', '')) if com_data else None
-            contrato = clean(com_data.get('contrato', '')) if com_data else None
-            su = clean(serv_uis)
-
-            if inc and inc.lower() == 'sí':
-                return '#8e44ad', 'incidencia'
-            elif serv_of and serv_of.lower() == 'no':
-                return '#e74c3c', 'no_serviciable'
-            elif su and su.lower() == 'sí':
-                return '#27ae60', 'serviciable'
-            elif contrato and contrato.lower() == 'sí' and (not su or su.lower() != 'sí'):
-                return '#f39c12', 'contratado'
-            elif contrato and contrato.lower() == 'no interesado' and (not su or su.lower() != 'sí'):
-                return '#95a5a6', 'no_interesado'
-            else:
-                return '#3498db', 'no_visitado'
+        # Colores por área
+        AREA_COLORS = {
+            'AREA A36': '#27ae60', 'AREA A00': '#3498db', 'AREA D45': '#e67e22',
+            'AREA A90': '#e74c3c', 'AREA A10': '#9b59b6', 'AREA B00': '#1abc9c',
+            'AREA A60': '#f39c12', 'AREA A70': '#2980b9', 'AREA B90': '#d35400',
+            'AREA C00': '#c0392b', 'AREA V30': '#16a085', 'AREA A80': '#8e44ad',
+            'AREA A01': '#2ecc71', 'AREA A30': '#e91e63', 'AREA A': '#607d8b',
+            'AREA D00': '#f1c40f', 'AREA C10': '#1a5276', 'AREA D10': '#cb4335',
+            'AREA B10': '#117a65', 'AREA NOT ASSIGNED': '#bdc3c7',
+            'AREA X33': '#a04000', 'AREA Y14': '#7d3c98', 'AREA C30': '#2e86c1',
+            'AREA B30': '#d4ac0d', 'AREA Y13': '#a93226', 'AREA C01': '#148f77',
+            'AREA B11': '#5b2c6f', 'AREA B': '#717d7e',
+        }
+        NO_AREA_COLOR = '#95a5a6'
 
         points = []
         for r in rows_duis + rows_apt:
             apt_id = r['apartment_id']
             com = comercial.get(apt_id, {})
 
-            # Determinar serviciable de datos_uis (si viene)
-            serv_uis = None
-            # datos_uis rows don't have 'serviciable' in our SELECT but the field
-            # exists in the table — we chose not to load it for performance.
-            # We use comercial_rafa's serviciable instead.
-
-            color, estado = color_estado(apt_id, serv_uis, com)
+            area = clean(r.get('apartment_sales_area'))
+            color = AREA_COLORS.get(area, NO_AREA_COLOR) if area else NO_AREA_COLOR
 
             p = {
                 'id': apt_id,
                 'lat': float(r['lat']),
                 'lon': float(r['lon']),
                 'c': color,
-                'e': estado,
+                'area': area or 'Sin área',
                 'prov': clean(r.get('provincia')) or '',
                 'mun': clean(r.get('municipio')) or '',
                 'pob': clean(r.get('poblacion')) or '',

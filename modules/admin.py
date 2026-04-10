@@ -613,15 +613,16 @@ def cargar_datos_por_provincia(provincia: str) -> Tuple[pd.DataFrame, pd.DataFra
     """Carga datos de una provincia específica desde datos_uis + apartments (prioridad datos_uis)"""
     conn = obtener_conexion()
     try:
-        # Unión de ambas tablas: datos_uis tiene prioridad, apartments aporta los que faltan
         query_uis = """
-            SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+            SELECT d.apartment_id, d.latitud, d.longitud, d.provincia, d.municipio, 
+                   d.poblacion, d.vial, d.numero, d.parcela_catastral, d.cto_id, d.tipo_olt_rental,
+                   a.apartment_sales_area,
                    'datos_uis' AS fuente
-            FROM datos_uis 
-            WHERE provincia = %s 
-            AND latitud IS NOT NULL AND longitud IS NOT NULL
-            AND latitud != 0 AND longitud != 0
+            FROM datos_uis d
+            LEFT JOIN apartments a ON a.apartment_id::text = LTRIM(d.apartment_id, 'P0')
+            WHERE d.provincia = %s 
+            AND d.latitud IS NOT NULL AND d.longitud IS NOT NULL
+            AND d.latitud != 0 AND d.longitud != 0
 
             UNION ALL
 
@@ -629,6 +630,7 @@ def cargar_datos_por_provincia(provincia: str) -> Tuple[pd.DataFrame, pd.DataFra
                    a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
                    a.poblacion, a.vial, a.numero, a.parcela_catastral,
                    NULL AS cto_id, NULL AS tipo_olt_rental,
+                   a.apartment_sales_area,
                    'apartments' AS fuente
             FROM apartments a
             WHERE a.provincia = %s
@@ -669,12 +671,14 @@ def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
     conn = obtener_conexion()
     try:
         query_uis = """
-            SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+            SELECT d.apartment_id, d.latitud, d.longitud, d.provincia, d.municipio, 
+                   d.poblacion, d.vial, d.numero, d.parcela_catastral, d.cto_id, d.tipo_olt_rental,
+                   a.apartment_sales_area,
                    'datos_uis' AS fuente
-            FROM datos_uis 
-            WHERE latitud IS NOT NULL AND longitud IS NOT NULL
-            AND latitud != 0 AND longitud != 0
+            FROM datos_uis d
+            LEFT JOIN apartments a ON a.apartment_id::text = LTRIM(d.apartment_id, 'P0')
+            WHERE d.latitud IS NOT NULL AND d.longitud IS NOT NULL
+            AND d.latitud != 0 AND d.longitud != 0
 
             UNION ALL
 
@@ -682,6 +686,7 @@ def cargar_datos_limitados() -> Tuple[pd.DataFrame, pd.DataFrame]:
                    a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
                    a.poblacion, a.vial, a.numero, a.parcela_catastral,
                    NULL AS cto_id, NULL AS tipo_olt_rental,
+                   a.apartment_sales_area,
                    'apartments' AS fuente
             FROM apartments a
             WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL
@@ -717,14 +722,15 @@ def buscar_por_id(apartment_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Búsqueda optimizada por ID en datos_uis + apartments"""
     conn = obtener_conexion()
     try:
-        # Buscar en datos_uis primero (prioridad), luego apartments
         query_uis = """
-            SELECT apartment_id, latitud, longitud, provincia, municipio, 
-                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+            SELECT d.apartment_id, d.latitud, d.longitud, d.provincia, d.municipio, 
+                   d.poblacion, d.vial, d.numero, d.parcela_catastral, d.cto_id, d.tipo_olt_rental,
+                   a.apartment_sales_area,
                    'datos_uis' AS fuente
-            FROM datos_uis 
-            WHERE apartment_id = %s 
-            AND latitud IS NOT NULL AND longitud IS NOT NULL
+            FROM datos_uis d
+            LEFT JOIN apartments a ON a.apartment_id::text = LTRIM(d.apartment_id, 'P0')
+            WHERE d.apartment_id = %s 
+            AND d.latitud IS NOT NULL AND d.longitud IS NOT NULL
 
             UNION ALL
 
@@ -732,6 +738,7 @@ def buscar_por_id(apartment_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
                    a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
                    a.poblacion, a.vial, a.numero, a.parcela_catastral,
                    NULL AS cto_id, NULL AS tipo_olt_rental,
+                   a.apartment_sales_area,
                    'apartments' AS fuente
             FROM apartments a
             WHERE 'P' || LPAD(a.apartment_id::text, 10, '0') = %s
@@ -766,14 +773,16 @@ def cargar_datos_por_bounds(south, north, west, east, limit=50000):
     conn = obtener_conexion()
     try:
         query_uis = """
-            SELECT apartment_id, latitud, longitud, provincia, municipio,
-                   poblacion, vial, numero, parcela_catastral, cto_id, tipo_olt_rental,
+            SELECT d.apartment_id, d.latitud, d.longitud, d.provincia, d.municipio,
+                   d.poblacion, d.vial, d.numero, d.parcela_catastral, d.cto_id, d.tipo_olt_rental,
+                   a.apartment_sales_area,
                    'datos_uis' AS fuente
-            FROM datos_uis
-            WHERE latitud BETWEEN %s AND %s
-            AND longitud BETWEEN %s AND %s
-            AND latitud IS NOT NULL AND longitud IS NOT NULL
-            AND latitud != 0 AND longitud != 0
+            FROM datos_uis d
+            LEFT JOIN apartments a ON a.apartment_id::text = LTRIM(d.apartment_id, 'P0')
+            WHERE d.latitud BETWEEN %s AND %s
+            AND d.longitud BETWEEN %s AND %s
+            AND d.latitud IS NOT NULL AND d.longitud IS NOT NULL
+            AND d.latitud != 0 AND d.longitud != 0
 
             UNION ALL
 
@@ -781,6 +790,7 @@ def cargar_datos_por_bounds(south, north, west, east, limit=50000):
                    a.lat AS latitud, a.lng AS longitud, a.provincia, a.municipio,
                    a.poblacion, a.vial, a.numero, a.parcela_catastral,
                    NULL AS cto_id, NULL AS tipo_olt_rental,
+                   a.apartment_sales_area,
                    'apartments' AS fuente
             FROM apartments a
             WHERE a.lat BETWEEN %s AND %s
@@ -1319,13 +1329,27 @@ L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={{x}}&y={{y}}&z={{z}}', {{
 if (SHOW_LEGEND) {{
   var legendDiv = document.createElement('div');
   legendDiv.className = 'legend';
-  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Leyenda</strong>' +
-    '<div class="item"><div class="dot" style="background:#27ae60"></div>Serviciable</div>' +
-    '<div class="item"><div class="dot" style="background:#e74c3c"></div>No serviciable</div>' +
-    '<div class="item"><div class="dot" style="background:#f39c12"></div>Contratado</div>' +
-    '<div class="item"><div class="dot" style="background:#8e44ad"></div>Incidencia</div>' +
-    '<div class="item"><div class="dot" style="background:#95a5a6"></div>No interesado</div>' +
-    '<div class="item"><div class="dot" style="background:#3498db"></div>No visitado</div>';
+  legendDiv.style.maxHeight = '300px';
+  legendDiv.style.overflowY = 'auto';
+  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Áreas</strong>' +
+    '<div class="item"><div class="dot" style="background:#3498db"></div>AREA A00</div>' +
+    '<div class="item"><div class="dot" style="background:#e67e22"></div>AREA D45</div>' +
+    '<div class="item"><div class="dot" style="background:#27ae60"></div>AREA A36</div>' +
+    '<div class="item"><div class="dot" style="background:#e74c3c"></div>AREA A90</div>' +
+    '<div class="item"><div class="dot" style="background:#9b59b6"></div>AREA A10</div>' +
+    '<div class="item"><div class="dot" style="background:#1abc9c"></div>AREA B00</div>' +
+    '<div class="item"><div class="dot" style="background:#f39c12"></div>AREA A60</div>' +
+    '<div class="item"><div class="dot" style="background:#2980b9"></div>AREA A70</div>' +
+    '<div class="item"><div class="dot" style="background:#d35400"></div>AREA B90</div>' +
+    '<div class="item"><div class="dot" style="background:#c0392b"></div>AREA C00</div>' +
+    '<div class="item"><div class="dot" style="background:#16a085"></div>AREA V30</div>' +
+    '<div class="item"><div class="dot" style="background:#8e44ad"></div>AREA A80</div>' +
+    '<div class="item"><div class="dot" style="background:#2ecc71"></div>AREA A01</div>' +
+    '<div class="item"><div class="dot" style="background:#e91e63"></div>AREA A30</div>' +
+    '<div class="item"><div class="dot" style="background:#607d8b"></div>AREA A</div>' +
+    '<div class="item"><div class="dot" style="background:#f1c40f"></div>AREA D00</div>' +
+    '<div class="item"><div class="dot" style="background:#bdc3c7"></div>AREA NOT ASSIGNED</div>' +
+    '<div class="item"><div class="dot" style="background:#95a5a6"></div>Sin área</div>';
   document.body.appendChild(legendDiv);
 }}
 
@@ -1340,8 +1364,6 @@ var loadTimeout = null;
 
 // ===== POPUP =====
 function buildPopupContent(p) {{
-  var estado = p.e.replace(/_/g,' ');
-  estado = estado.charAt(0).toUpperCase() + estado.slice(1);
   var fuente = p.fuente === 'datos_uis' ? '📋 datos_uis' : '🏗️ apartments';
 
   var h = '<div class="section-title">📍 Ubicación</div>' +
@@ -1350,13 +1372,13 @@ function buildPopupContent(p) {{
     '<div class="row"><div>' + p.via + ' ' + p.num + '</div></div>' +
     '<div class="row"><div style="color:#999;font-size:11px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
 
+  h += '<hr><div class="section-title">🗺️ Área</div>';
+  h += '<div class="row"><span class="label">Área Comercial</span><div class="value" style="color:' + p.c + ';font-weight:700;">' + p.area + '</div></div>';
+
   h += '<hr><div class="section-title">📋 Datos Técnicos</div>';
   h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + (p.pc || '—') + '</div></div>';
   h += '<div class="row"><span class="label">CTO</span><div class="value">' + (p.cto || '—') + '</div></div>';
   h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + (p.tor || '—') + '</div></div>';
-
-  h += '<hr><div class="section-title">📊 Estado</div>';
-  h += '<div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
 
   h += '<hr><div class="section-title">👤 Datos Comerciales</div>';
   h += '<div class="row"><span class="label">Comercial</span><div class="value">' + (p.com || '—') + '</div></div>';
@@ -1393,7 +1415,7 @@ function loadViewport() {{
   if (zoom < MIN_ZOOM) {{
     zoomMsg.style.opacity = '1';
     zoomMsg.style.display = 'block';
-    document.getElementById('statsBar').textContent = 'Acerca el zoom para ver puntos (nivel ' + MIN_ZOOM + '+)';
+    document.getElementById('statsBar').textContent = 'Acerca el zoom para ver puntos';
     return;
   }}
 
@@ -1724,18 +1746,25 @@ document.addEventListener('keydown', function(e) {{
                 lon -= offset
                 coord_offsets[coord_key] -= 1
 
-            # Determinar color
-            serv_uis = str(row.get('serviciable', '')).lower().strip() if 'serviciable' in row else ''
-            color, estado = determinar_color_marcador(apt_id, serv_uis, dicts)
-
-            # Color mapping para canvas
-            color_hex = {
-                'green': '#27ae60', 'red': '#e74c3c', 'orange': '#f39c12',
-                'purple': '#8e44ad', 'gray': '#95a5a6', 'blue': '#3498db'
-            }.get(color, '#3498db')
+            # Determinar color por área
+            area = clean(row.get('apartment_sales_area', ''))
+            area_colors = {
+                'AREA A36': '#27ae60', 'AREA A00': '#3498db', 'AREA D45': '#e67e22',
+                'AREA A90': '#e74c3c', 'AREA A10': '#9b59b6', 'AREA B00': '#1abc9c',
+                'AREA A60': '#f39c12', 'AREA A70': '#2980b9', 'AREA B90': '#d35400',
+                'AREA C00': '#c0392b', 'AREA V30': '#16a085', 'AREA A80': '#8e44ad',
+                'AREA A01': '#2ecc71', 'AREA A30': '#e91e63', 'AREA A': '#607d8b',
+                'AREA D00': '#f1c40f', 'AREA C10': '#1a5276', 'AREA D10': '#cb4335',
+                'AREA B10': '#117a65', 'AREA NOT ASSIGNED': '#bdc3c7',
+                'AREA X33': '#a04000', 'AREA Y14': '#7d3c98', 'AREA C30': '#2e86c1',
+                'AREA B30': '#d4ac0d', 'AREA Y13': '#a93226', 'AREA C01': '#148f77',
+                'AREA B11': '#5b2c6f', 'AREA B': '#717d7e',
+            }
+            color_hex = area_colors.get(area, '#95a5a6')
 
             point = {
-                'id': apt_id, 'lat': lat, 'lon': lon, 'c': color_hex, 'e': estado,
+                'id': apt_id, 'lat': lat, 'lon': lon, 'c': color_hex,
+                'area': area if area else 'Sin área',
                 'prov': clean(row.get('provincia', '')),
                 'mun': clean(row.get('municipio', '')),
                 'pob': clean(row.get('poblacion', '')),
@@ -1899,13 +1928,27 @@ L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={{x}}&y={{y}}&z={{z}}', {{
 if (SHOW_LEGEND) {{
   var legendDiv = document.createElement('div');
   legendDiv.className = 'legend';
-  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Leyenda</strong>' +
-    '<div class="item"><div class="dot" style="background:#27ae60"></div>Serviciable</div>' +
-    '<div class="item"><div class="dot" style="background:#e74c3c"></div>No serviciable</div>' +
-    '<div class="item"><div class="dot" style="background:#f39c12"></div>Contratado</div>' +
-    '<div class="item"><div class="dot" style="background:#8e44ad"></div>Incidencia</div>' +
-    '<div class="item"><div class="dot" style="background:#95a5a6"></div>No interesado</div>' +
-    '<div class="item"><div class="dot" style="background:#3498db"></div>No visitado</div>';
+  legendDiv.style.maxHeight = '300px';
+  legendDiv.style.overflowY = 'auto';
+  legendDiv.innerHTML = '<strong style="margin-bottom:6px;display:block;">Áreas</strong>' +
+    '<div class="item"><div class="dot" style="background:#3498db"></div>AREA A00</div>' +
+    '<div class="item"><div class="dot" style="background:#e67e22"></div>AREA D45</div>' +
+    '<div class="item"><div class="dot" style="background:#27ae60"></div>AREA A36</div>' +
+    '<div class="item"><div class="dot" style="background:#e74c3c"></div>AREA A90</div>' +
+    '<div class="item"><div class="dot" style="background:#9b59b6"></div>AREA A10</div>' +
+    '<div class="item"><div class="dot" style="background:#1abc9c"></div>AREA B00</div>' +
+    '<div class="item"><div class="dot" style="background:#f39c12"></div>AREA A60</div>' +
+    '<div class="item"><div class="dot" style="background:#2980b9"></div>AREA A70</div>' +
+    '<div class="item"><div class="dot" style="background:#d35400"></div>AREA B90</div>' +
+    '<div class="item"><div class="dot" style="background:#c0392b"></div>AREA C00</div>' +
+    '<div class="item"><div class="dot" style="background:#16a085"></div>AREA V30</div>' +
+    '<div class="item"><div class="dot" style="background:#8e44ad"></div>AREA A80</div>' +
+    '<div class="item"><div class="dot" style="background:#2ecc71"></div>AREA A01</div>' +
+    '<div class="item"><div class="dot" style="background:#e91e63"></div>AREA A30</div>' +
+    '<div class="item"><div class="dot" style="background:#607d8b"></div>AREA A</div>' +
+    '<div class="item"><div class="dot" style="background:#f1c40f"></div>AREA D00</div>' +
+    '<div class="item"><div class="dot" style="background:#bdc3c7"></div>AREA NOT ASSIGNED</div>' +
+    '<div class="item"><div class="dot" style="background:#95a5a6"></div>Sin área</div>';
   document.body.appendChild(legendDiv);
 }}
 
@@ -1917,28 +1960,22 @@ var canvasRenderer = L.canvas({{ padding: 0.5 }});
 var markerIndex = {{}};
 
 function buildPopupContent(p) {{
-  var estado = p.e.replace(/_/g,' ');
-  estado = estado.charAt(0).toUpperCase() + estado.slice(1);
   var fuente = p.fuente === 'datos_uis' ? '📋 datos_uis' : '🏗️ apartments';
 
-  // === UBICACIÓN (siempre visible) ===
   var h = '<div class="section-title">📍 Ubicación</div>' +
     '<div class="row"><div class="value">' + p.prov + '</div></div>' +
     '<div class="row"><div>' + p.mun + ' - ' + p.pob + '</div></div>' +
     '<div class="row"><div>' + p.via + ' ' + p.num + '</div></div>' +
     '<div class="row"><div style="color:#999;font-size:11px;">📍 ' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '</div></div>';
 
-  // === DATOS TÉCNICOS (datos_uis: parcela, CTO, tipo OLT) ===
+  h += '<hr><div class="section-title">🗺️ Área</div>';
+  h += '<div class="row"><span class="label">Área Comercial</span><div class="value" style="color:' + p.c + ';font-weight:700;">' + p.area + '</div></div>';
+
   h += '<hr><div class="section-title">📋 Datos Técnicos</div>';
   h += '<div class="row"><span class="label">Parcela Catastral</span><div class="value">' + (p.pc || '—') + '</div></div>';
   h += '<div class="row"><span class="label">CTO</span><div class="value">' + (p.cto || '—') + '</div></div>';
   h += '<div class="row"><span class="label">Tipo OLT Rental</span><div class="value">' + (p.tor || '—') + '</div></div>';
 
-  // === ESTADO (siempre visible) ===
-  h += '<hr><div class="section-title">📊 Estado</div>';
-  h += '<div class="row"><span class="label">Estado</span><div class="value" style="color:' + p.c + '">' + estado + '</div></div>';
-
-  // === DATOS COMERCIALES (comercial_rafa) ===
   h += '<hr><div class="section-title">👤 Datos Comerciales</div>';
   h += '<div class="row"><span class="label">Comercial</span><div class="value">' + (p.com || '—') + '</div></div>';
 
@@ -1953,13 +1990,11 @@ function buildPopupContent(p) {{
     h += '<div class="row"><span class="label">Observaciones</span><div style="font-size:12px;color:#555;">' + p.obs + '</div></div>';
   }}
 
-  // Coordenadas comercial
   if (p.latc && p.lonc) {{
     h += '<div class="row"><span class="label">Coords. Comercial</span>' +
       '<div style="color:#999;font-size:11px;">📍 ' + p.latc + ', ' + p.lonc + '</div></div>';
   }}
 
-  // === FUENTE ===
   h += '<hr><div style="text-align:right;font-size:10px;color:#aaa;">' + fuente + '</div>';
 
   return h;
